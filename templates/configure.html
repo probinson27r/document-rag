@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Configure - ED19024 AI Assistant</title>
+    <style>
+        html, body {
+            width: 100vw;
+            height: 100vh;
+            margin: 0;
+            padding: 0;
+            overflow-x: hidden;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+        .topbar {
+            width: 100vw; display: flex; justify-content: flex-end; align-items: center;
+            background: rgba(255,255,255,0.1); padding: 16px 30px; position: relative;
+            box-sizing: border-box;
+        }
+        .back-link {
+            color: #3b82f6; background: white; border-radius: 6px; padding: 8px 18px;
+            font-size: 14px; font-weight: 500; text-decoration: none; box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+            transition: background 0.2s;
+        }
+        .back-link:hover {
+            background: #e0e7ef;
+        }
+        .config-content {
+            max-width: 440px; width: 100%; margin: 40px auto; background: rgba(255,255,255,0.95); border-radius: 12px; box-shadow: 0 4px 32px rgba(0,0,0,0.08); padding: 32px 32px 24px 32px;
+            box-sizing: border-box;
+        }
+        .section-title {
+            color: #1f2937; font-size: 16px; font-weight: 600; margin-bottom: 15px;
+            text-transform: uppercase; letter-spacing: 0.5px;
+        }
+        .model-section { margin-bottom: 24px; }
+        .model-label { color: #1f2937; font-size: 13px; font-weight: 500; margin-bottom: 6px; display: block; }
+        .model-select {
+            width: 100%; background: #f3f4f6; border: 1px solid #d1d5db;
+            color: #1f2937; padding: 8px 12px; border-radius: 4px; font-size: 13px;
+            outline: none; margin-bottom: 8px;
+        }
+        .instructions-section { margin-bottom: 20px; }
+        .instructions-textarea {
+            width: 100%; background: rgba(59,130,246,0.07); border: 1px solid #d1d5db;
+            color: #1f2937; padding: 12px; border-radius: 6px; font-size: 13px; min-height: 120px;
+            outline: none; resize: vertical; font-family: inherit;
+        }
+        .instructions-textarea::placeholder { color: #6b7280; }
+        .instructions-buttons { display: flex; gap: 8px; margin-top: 10px; }
+        .instructions-btn {
+            background: #3b82f6; border: none; color: white; padding: 6px 16px; border-radius: 4px; font-size: 12px;
+            cursor: pointer; transition: background 0.2s;
+        }
+        .instructions-btn:hover { background: #2563eb; }
+        .instructions-btn.secondary {
+            background: #e5e7eb; color: #1f2937;
+        }
+        .instructions-btn.secondary:hover { background: #d1d5db; }
+        .upload-area {
+            border: 2px dashed #3b82f6; border-radius: 8px; padding: 20px;
+            text-align: center; color: #3b82f6; cursor: pointer;
+            transition: all 0.3s ease; margin-bottom: 20px; background: #f3f4f6;
+        }
+        .upload-area:hover { border-color: #2563eb; background: #e0e7ef; }
+        .file-input { display: none; }
+        .document-list { max-height: 300px; overflow-y: auto; margin-bottom: 10px; }
+        .document-item {
+            background: #f3f4f6; border-radius: 6px; padding: 12px; margin-bottom: 8px;
+            display: flex; justify-content: space-between; align-items: center;
+        }
+        .document-info { flex: 1; min-width: 0; }
+        .document-name {
+            color: #1f2937; font-size: 13px; font-weight: 500;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        }
+        .document-meta { color: #6b7280; font-size: 11px; margin-top: 2px; }
+        .delete-btn {
+            background: #fee2e2; border: none; color: #ef4444;
+            width: 24px; height: 24px; border-radius: 4px; cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+            margin-left: 4px;
+        }
+        .view-chunks-btn {
+            background: #e0e7eb; border: none; color: #3b82f6;
+            padding: 4px 10px; border-radius: 4px; font-size: 12px; cursor: pointer;
+            margin-right: 4px;
+        }
+        .view-chunks-btn:hover { background: #d1d5db; }
+        /* Modal styles */
+        .modal-bg {
+            display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+            background: rgba(0,0,0,0.5); z-index: 10001; justify-content: center; align-items: center;
+        }
+        .modal-content {
+            background: white; max-width: 700px; width: 90vw; max-height: 80vh; overflow: auto;
+            border-radius: 10px; padding: 30px; position: relative; box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+        }
+        .close-modal-btn {
+            position: absolute; top: 10px; right: 10px; background: #eee; border: none; border-radius: 50%; width: 32px; height: 32px; font-size: 18px; cursor: pointer;
+        }
+        @media (max-width: 600px) {
+            .config-content { padding: 16px 4vw 12px 4vw; }
+        }
+    </style>
+</head>
+<body>
+    <div class="topbar">
+        <a href="/chat" class="back-link">← Back to Chat</a>
+    </div>
+    <div class="config-content">
+        <div class="section-title">Model Selection</div>
+        <div class="model-section">
+            <label class="model-label" for="modelSelect">Current Model</label>
+            <select class="model-select" id="modelSelect">
+                <option value="">Loading models...</option>
+            </select>
+        </div>
+        <div class="section-title">AI Instructions</div>
+        <div class="instructions-section">
+            <textarea class="instructions-textarea" id="instructionsTextarea" 
+                      placeholder="Customize how the AI should behave and respond to your questions..."></textarea>
+            <div class="instructions-buttons">
+                <button class="instructions-btn" id="saveInstructionsBtn">Save</button>
+                <button class="instructions-btn secondary" id="resetInstructionsBtn">Reset</button>
+            </div>
+        </div>
+        <div class="section-title">Upload Legal Documents</div>
+        <div class="upload-area" id="uploadArea">
+            <div>📄 Drop legal documents here or click to browse</div>
+            <div style="font-size: 12px; margin-top: 5px; opacity: 0.7;">
+                PDF, DOCX, TXT, CSV, JSON
+            </div>
+        </div>
+        <input type="file" class="file-input" id="fileInput" 
+               accept=".pdf,.docx,.txt,.csv,.json" multiple>
+        <div class="section-title">Your Documents (<span id="docCount">0</span>)</div>
+        <div class="document-list" id="documentList">
+            <div style="color: #6b7280; text-align: center; padding: 20px; font-size: 14px;">
+                Loading documents...
+            </div>
+        </div>
+    </div>
+    <!-- Modal for viewing chunks -->
+    <div class="modal-bg" id="chunkModalBg">
+        <div class="modal-content">
+            <button class="close-modal-btn" id="closeChunkModal">×</button>
+            <div id="chunkModalTitle" style="font-size:18px;font-weight:600;margin-bottom:18px;"></div>
+            <div id="chunkModalBody" style="font-size:13px;line-height:1.6;"></div>
+        </div>
+    </div>
+    <script>
+    // Model selection
+    async function loadModels() {
+        const modelSelect = document.getElementById('modelSelect');
+        try {
+            const response = await fetch('/api/models');
+            const data = await response.json();
+            modelSelect.innerHTML = '';
+            if (data.available_models && data.available_models.length > 0) {
+                data.available_models.forEach(model => {
+                    const option = document.createElement('option');
+                    option.value = model;
+                    option.textContent = model;
+                    if (model === data.current_model) option.selected = true;
+                    modelSelect.appendChild(option);
+                });
+            }
+            modelSelect.addEventListener('change', async function() {
+                const selectedModel = this.value;
+                if (selectedModel && selectedModel !== data.current_model) {
+                    await switchModel(selectedModel);
+                }
+            });
+        } catch (error) {
+            modelSelect.innerHTML = '<option>Error loading models</option>';
+        }
+    }
+    async function switchModel(newModel) {
+        try {
+            const response = await fetch('/api/models/switch', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ model: newModel })
+            });
+            const result = await response.json();
+            if (response.ok) {
+                showNotification(`Switched to ${newModel}`, 'success');
+            } else {
+                showNotification(`Failed to switch model: ${result.error}`, 'error');
+            }
+        } catch (error) {
+            showNotification('Failed to switch model', 'error');
+        }
+    }
+    // Instructions
+    async function loadInstructions() {
+        try {
+            const response = await fetch('/api/instructions');
+            const data = await response.json();
+            document.getElementById('instructionsTextarea').value = data.instructions || '';
+        } catch (error) {
+            showNotification('Failed to load AI instructions', 'warning');
+        }
+    }
+    async function saveInstructions() {
+        try {
+            const instructions = document.getElementById('instructionsTextarea').value.trim();
+            if (!instructions) {
+                showNotification('Instructions cannot be empty', 'error');
+                return;
+            }
+            const response = await fetch('/api/instructions', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ instructions })
+            });
+            const result = await response.json();
+            if (response.ok) {
+                showNotification('AI instructions updated successfully', 'success');
+            } else {
+                showNotification(`Failed to save instructions: ${result.error}`, 'error');
+            }
+        } catch (error) {
+            showNotification('Failed to save instructions', 'error');
+        }
+    }
+    async function resetInstructions() {
+        try {
+            const response = await fetch('/api/instructions/reset', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+            });
+            const result = await response.json();
+            if (response.ok) {
+                document.getElementById('instructionsTextarea').value = result.instructions || '';
+                showNotification('AI instructions reset to default', 'success');
+            } else {
+                showNotification(`Failed to reset instructions: ${result.error}`, 'error');
+            }
+        } catch (error) {
+            showNotification('Failed to reset instructions', 'error');
+        }
+    }
+    // Document upload and list
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+    function renderDocuments(docs) {
+        const documentList = document.getElementById('documentList');
+        const docCount = document.getElementById('docCount');
+        if (!docs || docs.length === 0) {
+            documentList.innerHTML = '<div style="color: #6b7280; text-align: center; padding: 20px; font-size: 14px;">No documents uploaded yet</div>';
+            docCount.textContent = '0';
+            return;
+        }
+        docCount.textContent = docs.length;
+        documentList.innerHTML = docs.map(doc => `
+            <div class="document-item">
+                <div class="document-info">
+                    <div class="document-name">${escapeHtml(doc.filename || 'Unknown')}</div>
+                    <div class="document-meta">${doc.total_chunks || 0} chunks • ${doc.file_type || 'unknown'}</div>
+                </div>
+                <button class="view-chunks-btn" onclick="viewChunks('${escapeHtml(doc.filename || '')}')">View Chunks</button>
+                <button class="delete-btn" onclick="deleteDocument('${escapeHtml(doc.filename || '')}')">×</button>
+            </div>
+        `).join('');
+    }
+    async function loadDocuments() {
+        try {
+            const response = await fetch('/api/documents');
+            const docs = await response.json();
+            renderDocuments(docs);
+        } catch (error) {
+            document.getElementById('documentList').innerHTML = '<div style="color: #6b7280; text-align: center; padding: 20px; font-size: 14px;">Error loading documents</div>';
+            document.getElementById('docCount').textContent = '0';
+        }
+    }
+    async function uploadFiles(files) {
+        const uploadArea = document.getElementById('uploadArea');
+        const fileInput = document.getElementById('fileInput');
+        document.getElementById('documentList').innerHTML = '<div style="color: #3b82f6; text-align: center; padding: 20px; font-size: 15px;"><span class="spinner" style="display:inline-block;width:18px;height:18px;border:3px solid #3b82f6;border-top:3px solid #e0e7ef;border-radius:50%;animation:spin 1s linear infinite;vertical-align:middle;margin-right:8px;"></span>Processing legal document(s)...</div>';
+        uploadArea.style.pointerEvents = 'none';
+        uploadArea.style.opacity = '0.6';
+        fileInput.disabled = true;
+        for (const file of files) {
+            await uploadFile(file);
+        }
+        uploadArea.style.pointerEvents = '';
+        uploadArea.style.opacity = '';
+        fileInput.disabled = false;
+        loadDocuments();
+    }
+    async function uploadFile(file) {
+        try {
+            const formData = new FormData();
+            formData.append('file', file);
+            const response = await fetch('/upload', {
+                method: 'POST',
+                body: formData
+            });
+            if (response.ok) {
+                showNotification(`✅ ${file.name} uploaded successfully`, 'success');
+            } else {
+                throw new Error(`Failed to upload ${file.name}`);
+            }
+        } catch (error) {
+            showNotification(`❌ Failed to upload ${file.name}`, 'error');
+        }
+    }
+    async function deleteDocument(filename) {
+        if (!confirm(`Delete ${filename}?`)) return;
+        try {
+            const response = await fetch(`/api/documents/${filename}`, { method: 'DELETE' });
+            if (response.ok) {
+                showNotification(`🗑️ ${filename} deleted`, 'success');
+                loadDocuments();
+            } else {
+                throw new Error('Delete failed');
+            }
+        } catch (error) {
+            showNotification(`❌ Failed to delete ${filename}`, 'error');
+        }
+    }
+    // Chunk modal logic
+    const chunkModalBg = document.getElementById('chunkModalBg');
+    document.getElementById('closeChunkModal').onclick = () => { chunkModalBg.style.display = 'none'; };
+    async function viewChunks(filename) {
+        chunkModalBg.style.display = 'flex';
+        document.getElementById('chunkModalTitle').textContent = `Chunks for: ${filename}`;
+        document.getElementById('chunkModalBody').innerHTML = '<div style="color:#888;">Loading...</div>';
+        try {
+            const response = await fetch(`/api/documents/${filename}/chunks`);
+            const data = await response.json();
+            if (data.error) {
+                document.getElementById('chunkModalBody').innerHTML = `<div style='color:#e53e3e;'>${escapeHtml(data.error)}</div>`;
+                return;
+            }
+            if (!data.chunks || data.chunks.length === 0) {
+                document.getElementById('chunkModalBody').innerHTML = '<div style="color:#888;">No chunks found for this document.</div>';
+                return;
+            }
+            document.getElementById('chunkModalBody').innerHTML = data.chunks.map(chunk => `
+                <div style="margin-bottom:18px;padding-bottom:12px;border-bottom:1px solid #eee;">
+                    <div style="font-size:12px;color:#666;margin-bottom:4px;">
+                        <b>Chunk #${chunk.index+1}</b> | <b>Section:</b> ${escapeHtml(chunk.section_number)} - ${escapeHtml(chunk.section_title)} | <b>Type:</b> ${escapeHtml(chunk.chunk_type)} | <b>Pages:</b> ${escapeHtml(chunk.pages)}
+                    </div>
+                    <div style="white-space:pre-wrap;">${escapeHtml(chunk.text)}</div>
+                </div>
+            `).join('');
+        } catch (error) {
+            document.getElementById('chunkModalBody').innerHTML = `<div style='color:#e53e3e;'>Failed to load chunks: ${escapeHtml(error.message)}</div>`;
+        }
+    }
+    // File upload drag/drop
+    const uploadArea = document.getElementById('uploadArea');
+    const fileInput = document.getElementById('fileInput');
+    uploadArea.addEventListener('click', () => fileInput.click());
+    uploadArea.addEventListener('dragover', e => {
+        e.preventDefault();
+        uploadArea.style.borderColor = '#2563eb';
+        uploadArea.style.background = '#e0e7ef';
+    });
+    uploadArea.addEventListener('dragleave', e => {
+        e.preventDefault();
+        uploadArea.style.borderColor = '#3b82f6';
+        uploadArea.style.background = '#f3f4f6';
+    });
+    uploadArea.addEventListener('drop', e => {
+        e.preventDefault();
+        uploadArea.style.borderColor = '#3b82f6';
+        uploadArea.style.background = '#f3f4f6';
+        const files = Array.from(e.dataTransfer.files);
+        uploadFiles(files);
+    });
+    fileInput.addEventListener('change', e => {
+        const files = Array.from(e.target.files);
+        uploadFiles(files);
+    });
+    // Instructions button events
+    document.getElementById('saveInstructionsBtn').addEventListener('click', saveInstructions);
+    document.getElementById('resetInstructionsBtn').addEventListener('click', resetInstructions);
+    // Initial load
+    loadModels();
+    loadInstructions();
+    loadDocuments();
+    // Notification
+    function showNotification(message, type = 'info') {
+        const notification = document.createElement('div');
+        notification.className = `notification ${type}`;
+        notification.textContent = message;
+        document.body.appendChild(notification);
+        setTimeout(() => notification.remove(), 3000);
+    }
+    </script>
+</body>
+</html> 

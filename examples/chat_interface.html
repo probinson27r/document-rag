@@ -1,0 +1,1108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ED19024 AI Assistant</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            height: 100vh; overflow: hidden;
+        }
+        
+        .app { display: flex; height: 100vh; }
+        
+        .sidebar {
+            width: 300px; background: rgba(0,0,0,0.2); backdrop-filter: blur(20px);
+            border-right: 1px solid rgba(255,255,255,0.1); display: flex; flex-direction: column;
+        }
+        
+        .sidebar-header {
+            padding: 20px; border-bottom: 1px solid rgba(255,255,255,0.1);
+            color: white;
+        }
+        
+        .logo { font-size: 20px; font-weight: 600; margin-bottom: 15px; }
+        
+        .model-info {
+            background: rgba(255,255,255,0.1); border-radius: 6px; padding: 12px; margin-bottom: 15px;
+        }
+        
+        .model-label {
+            color: rgba(255,255,255,0.7); font-size: 11px; text-transform: uppercase;
+            letter-spacing: 0.5px; margin-bottom: 5px;
+        }
+        
+        .model-name { color: white; font-size: 13px; font-weight: 500; margin-bottom: 8px; }
+        
+        .status { display: flex; align-items: center; gap: 8px; font-size: 12px; color: rgba(255,255,255,0.7); }
+        
+        .status-dot { width: 8px; height: 8px; border-radius: 50%; background: #4ade80; }
+        
+        .sidebar-content { flex: 1; padding: 20px; overflow-y: auto; }
+        
+        .section-title {
+            color: white; font-size: 14px; font-weight: 500; margin-bottom: 15px;
+            text-transform: uppercase; letter-spacing: 0.5px;
+        }
+        
+        .upload-area {
+            border: 2px dashed rgba(255,255,255,0.3); border-radius: 8px; padding: 20px;
+            text-align: center; color: rgba(255,255,255,0.7); cursor: pointer;
+            transition: all 0.3s ease; margin-bottom: 20px;
+        }
+        
+        .upload-area:hover { border-color: rgba(255,255,255,0.5); background: rgba(255,255,255,0.05); }
+        
+        .document-list { max-height: 300px; overflow-y: auto; }
+        
+        .document-item {
+            background: rgba(255,255,255,0.1); border-radius: 6px; padding: 12px; margin-bottom: 8px;
+            display: flex; justify-content: space-between; align-items: center;
+        }
+        
+        .document-info { flex: 1; min-width: 0; }
+        
+        .document-name {
+            color: white; font-size: 13px; font-weight: 500;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        }
+        
+        .document-meta { color: rgba(255,255,255,0.6); font-size: 11px; margin-top: 2px; }
+        
+        .delete-btn {
+            background: rgba(239,68,68,0.2); border: none; color: #ef4444;
+            width: 24px; height: 24px; border-radius: 4px; cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+            margin-left: 4px;
+        }
+        
+        .view-btn {
+            background: rgba(59,130,246,0.2); border: none; color: #3b82f6;
+            width: 24px; height: 24px; border-radius: 4px; cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+            margin-left: 4px;
+        }
+        
+        .view-btn:hover { background: rgba(59,130,246,0.3); }
+        
+        /* Chunk Viewer Modal */
+        .modal {
+            display: none; position: fixed; z-index: 1000; left: 0; top: 0;
+            width: 100%; height: 100%; background: rgba(0,0,0,0.5);
+        }
+        
+        .modal-content {
+            background: white; margin: 2% auto; padding: 0; width: 90%; height: 90%;
+            border-radius: 8px; display: flex; flex-direction: column;
+        }
+        
+        .modal-header {
+            padding: 20px; border-bottom: 1px solid #eee; display: flex;
+            justify-content: space-between; align-items: center;
+        }
+        
+        .modal-title { font-size: 18px; font-weight: 600; color: #1f2937; }
+        
+        .close-btn {
+            background: none; border: none; font-size: 24px; cursor: pointer;
+            color: #6b7280; padding: 0; width: 30px; height: 30px;
+        }
+        
+        .modal-body {
+            flex: 1; padding: 20px; overflow-y: auto;
+        }
+        
+        .chunk-search {
+            margin-bottom: 20px; display: flex; gap: 10px;
+        }
+        
+        .chunk-search input {
+            flex: 1; padding: 10px; border: 1px solid #ddd; border-radius: 4px;
+        }
+        
+        .chunk-search button {
+            padding: 10px 20px; background: #3b82f6; color: white;
+            border: none; border-radius: 4px; cursor: pointer;
+        }
+        
+        .chunk-stats {
+            background: #f8f9fa; padding: 15px; border-radius: 4px; margin-bottom: 20px;
+            font-size: 14px; color: #6b7280;
+        }
+        
+        .chunk-item {
+            border: 1px solid #e5e7eb; border-radius: 4px; margin-bottom: 15px;
+            background: white;
+        }
+        
+        .chunk-header {
+            padding: 10px 15px; background: #f9fafb; border-bottom: 1px solid #e5e7eb;
+            display: flex; justify-content: space-between; align-items: center;
+        }
+        
+        .chunk-meta {
+            font-size: 12px; color: #6b7280;
+        }
+        
+        .chunk-content {
+            padding: 15px; line-height: 1.6; color: #374151;
+            max-height: 200px; overflow-y: auto;
+        }
+        
+        .similarity-score {
+            background: #dbeafe; color: #1e40af; padding: 2px 6px;
+            border-radius: 12px; font-size: 11px; font-weight: 500;
+        }
+        
+        .main-content {
+            flex: 1; display: flex; flex-direction: column;
+            background: rgba(255,255,255,0.95); backdrop-filter: blur(20px);
+        }
+        
+        .chat-header {
+            padding: 20px 30px; border-bottom: 1px solid rgba(0,0,0,0.1);
+            background: rgba(255,255,255,0.5);
+        }
+        
+        .chat-title { font-size: 24px; font-weight: 600; color: #1f2937; margin-bottom: 5px; }
+        .chat-subtitle { color: #6b7280; font-size: 14px; }
+        
+        .chat-container {
+            flex: 1; overflow-y: auto; padding: 20px 30px;
+            display: flex; flex-direction: column; gap: 20px;
+        }
+        
+        .welcome {
+            text-align: center; color: #6b7280; margin-top: 50px;
+        }
+        
+        .welcome h2 { color: #1f2937; margin-bottom: 10px; }
+        
+        .message {
+            display: flex; gap: 15px; animation: fadeIn 0.3s ease;
+        }
+        
+        .message.user { flex-direction: row-reverse; }
+        
+        .message-avatar {
+            width: 40px; height: 40px; border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+            font-weight: 600; font-size: 14px; flex-shrink: 0;
+        }
+        
+        .message.user .message-avatar {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;
+        }
+        
+        .message.assistant .message-avatar {
+            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); color: white;
+        }
+        
+        .message-content { flex: 1; max-width: calc(100% - 55px); }
+        
+        .message-bubble {
+            background: white; border-radius: 18px; padding: 15px 20px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1); border: 1px solid rgba(0,0,0,0.05);
+        }
+        
+        .message.user .message-bubble {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white; margin-left: 60px;
+        }
+        
+        .message-text { line-height: 1.5; word-wrap: break-word; }
+        
+        .message-sources {
+            margin-top: 15px; padding-top: 15px; border-top: 1px solid rgba(0,0,0,0.1);
+        }
+        
+        .sources-label { font-size: 12px; color: #6b7280; font-weight: 500; margin-bottom: 8px; }
+        
+        .source-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+        
+        .source-tag {
+            background: rgba(59,130,246,0.1); color: #3b82f6; padding: 4px 8px;
+            border-radius: 12px; font-size: 11px; font-weight: 500;
+        }
+        
+        .message-timestamp {
+            color: rgba(0,0,0,0.4); font-size: 11px; margin-top: 8px;
+        }
+        
+        .message.user .message-timestamp { color: rgba(255,255,255,0.7); }
+        
+        .input-container {
+            padding: 20px 30px; border-top: 1px solid rgba(0,0,0,0.1);
+            background: rgba(255,255,255,0.8); backdrop-filter: blur(20px);
+        }
+        
+        .input-wrapper { position: relative; max-width: 800px; margin: 0 auto; }
+        
+        .message-input {
+            width: 100%; border: 2px solid rgba(0,0,0,0.1); border-radius: 25px;
+            padding: 15px 60px 15px 20px; font-size: 16px; background: white;
+            outline: none; resize: none; min-height: 50px; max-height: 120px;
+            font-family: inherit;
+        }
+        
+        .message-input:focus {
+            border-color: #667eea; box-shadow: 0 0 0 3px rgba(102,126,234,0.1);
+        }
+        
+        .send-button {
+            position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+            width: 40px; height: 40px; border: none; border-radius: 50%;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white; cursor: pointer; display: flex; align-items: center; justify-content: center;
+        }
+        
+        .send-button:disabled { opacity: 0.5; cursor: not-allowed; }
+        
+        .typing {
+            display: none; align-items: center; gap: 8px; color: #6b7280;
+            font-style: italic; margin-top: 10px;
+        }
+        
+        .typing-dots { display: flex; gap: 4px; }
+        
+        .typing-dot {
+            width: 6px; height: 6px; border-radius: 50%; background: #6b7280;
+            animation: typing 1.4s infinite ease-in-out;
+        }
+        
+        .typing-dot:nth-child(1) { animation-delay: -0.32s; }
+        .typing-dot:nth-child(2) { animation-delay: -0.16s; }
+        
+        @keyframes typing {
+            0%, 80%, 100% { transform: scale(0.8); opacity: 0.5; }
+            40% { transform: scale(1); opacity: 1; }
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        .sidebar-tabs {
+            display: flex; margin-bottom: 20px; border-radius: 6px;
+            background: rgba(255, 255, 255, 0.1); padding: 4px;
+        }
+
+        .sidebar-tab {
+            flex: 1; padding: 8px 12px; text-align: center; color: rgba(255, 255, 255, 0.7);
+            cursor: pointer; border-radius: 4px; font-size: 12px; font-weight: 500;
+            transition: all 0.3s ease;
+        }
+
+        .sidebar-tab.active {
+            background: rgba(255, 255, 255, 0.2); color: white;
+        }
+
+        .sidebar-tab:hover { color: white; }
+
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+
+        .prompt-templates { margin-bottom: 15px; }
+
+        .template-selector {
+            width: 100%; padding: 8px; border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 4px; background: rgba(255, 255, 255, 0.1); color: white;
+            font-size: 12px; outline: none;
+        }
+
+        .template-selector option { background: #333; color: white; }
+
+        .template-info {
+            margin-top: 8px; padding: 8px; background: rgba(255, 255, 255, 0.05);
+            border-radius: 4px; font-size: 11px; color: rgba(255, 255, 255, 0.8);
+            line-height: 1.4;
+        }
+
+        .prompt-editor {
+            background: rgba(255, 255, 255, 0.1); border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 8px; color: white; padding: 15px; width: 100%; min-height: 120px;
+            font-size: 12px; font-family: 'Monaco', 'Consolas', monospace; resize: vertical;
+            outline: none; margin-bottom: 10px;
+        }
+
+        .prompt-editor:focus {
+            border-color: rgba(255, 255, 255, 0.4); background: rgba(255, 255, 255, 0.15);
+        }
+
+        .prompt-controls { display: flex; gap: 8px; }
+
+        .prompt-btn {
+            padding: 6px 12px; border: none; border-radius: 4px; font-size: 11px;
+            font-weight: 500; cursor: pointer; transition: all 0.3s ease;
+        }
+
+        .prompt-btn.primary { background: #4ade80; color: white; }
+        .prompt-btn.secondary { background: rgba(255, 255, 255, 0.2); color: white; }
+        .prompt-btn:hover { transform: translateY(-1px); }
+        
+        .notification {
+            position: fixed; top: 20px; right: 20px; padding: 12px 20px;
+            border-radius: 8px; z-index: 10000; color: white; font-size: 14px;
+            animation: slideIn 0.3s ease; max-width: 300px;
+        }
+        
+        .notification.success { background: #10b981; }
+        .notification.error { background: #ef4444; }
+        .notification.warning { background: #f59e0b; }
+        .notification.info { background: #3b82f6; }
+        
+        @keyframes slideIn {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="app">
+        <div class="sidebar">
+            <div class="sidebar-header">
+                <div class="logo">📚 ED19024 AI</div>
+                <div class="model-info">
+                    <div class="model-label">Current Model</div>
+                    <div class="model-name" id="currentModel">Loading...</div>
+                </div>
+                <div class="status">
+                    <div class="status-dot" id="statusDot"></div>
+                    <span id="statusText">Connecting...</span>
+                </div>
+            </div>
+            
+            <div class="sidebar-content">
+                <div class="sidebar-tabs">
+                    <div class="sidebar-tab active" data-tab="documents">📄 Docs</div>
+                    <div class="sidebar-tab" data-tab="prompts">🎭 Prompts</div>
+                </div>
+
+                <!-- Documents Tab -->
+                <div class="tab-content active" id="documentsTab">
+                    <div class="section-title">Upload Documents</div>
+                    <div class="upload-area" id="uploadArea">
+                        <div>📄 Drop files here or click to browse</div>
+                        <div style="font-size: 12px; margin-top: 5px; opacity: 0.7;">
+                            PDF, DOCX, TXT, CSV, JSON
+                        </div>
+                    </div>
+                    <input type="file" class="file-input" id="fileInput" 
+                           accept=".pdf,.docx,.txt,.csv,.json" multiple>
+                    
+                    <div class="section-title">Your Documents (<span id="docCount">0</span>)</div>
+                    <div class="document-list" id="documentList">
+                        <div style="color: rgba(255,255,255,0.5); text-align: center; padding: 20px; font-size: 14px;">
+                            Loading documents...
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Prompts Tab -->
+                <div class="tab-content" id="promptsTab">
+                    <div class="section-title">AI Behavior</div>
+                    
+                    <div class="prompt-templates">
+                        <select class="template-selector" id="templateSelector">
+                            <option value="">Select a template...</option>
+                        </select>
+                        <div class="template-info" id="templateInfo">
+                            Choose a template to customize how the AI responds to your questions.
+                        </div>
+                    </div>
+
+                    <textarea class="prompt-editor" id="promptEditor" 
+                              placeholder="Enter custom instructions for how the AI should respond..."></textarea>
+                    
+                    <div class="prompt-controls">
+                        <button class="prompt-btn primary" id="savePromptBtn">💾 Save</button>
+                        <button class="prompt-btn secondary" id="resetPromptBtn">🔄 Reset</button>
+                        <button class="prompt-btn secondary" id="testPromptBtn">🧪 Test</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="main-content">
+            <div class="chat-header">
+                <div class="chat-title">ED19024 Assistant</div>
+                <div class="chat-subtitle">Ask questions about ED19024</div>
+            </div>
+
+            <div class="chat-container" id="chatContainer">
+                <div class="welcome" id="welcomeMessage">
+                    <h2>👋 Welcome to your ED19024 AI Assistant</h2>
+                    <p>Upload ED19024 using the sidebar and start asking questions about their content.</p>
+                </div>
+            </div>
+
+            <div class="input-container">
+                <div class="input-wrapper">
+                    <textarea class="message-input" id="messageInput" 
+                              placeholder="Ask a question about your ED19024 documents..." 
+                              rows="1"></textarea>
+                    <button class="send-button" id="sendButton" disabled>
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <line x1="22" y1="2" x2="11" y2="13"></line>
+                            <polygon points="22,2 15,22 11,13 2,9"></polygon>
+                        </svg>
+                    </button>
+                </div>
+                <div class="typing" id="typingIndicator">
+                    <span>AI is thinking</span>
+                    <div class="typing-dots">
+                        <div class="typing-dot"></div>
+                        <div class="typing-dot"></div>
+                        <div class="typing-dot"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Chunk Viewer Modal -->
+    <div id="chunkModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <div class="modal-title" id="modalTitle">Document Chunks</div>
+                <button class="close-btn" onclick="closeChunkModal()">×</button>
+            </div>
+            <div class="modal-body">
+                <div class="chunk-search">
+                    <input type="text" id="chunkSearchInput" placeholder="Search within this document...">
+                    <button onclick="searchChunks()">Search</button>
+                    <button onclick="viewAllChunks()">View All</button>
+                </div>
+                <div class="chunk-stats" id="chunkStats">Loading chunks...</div>
+                <div id="chunkList">
+                    <!-- Chunks will be loaded here -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        console.log('🚀 Starting Document AI Assistant...');
+        
+        // Global variables
+        let isTyping = false;
+        let conversationHistory = [];
+        let promptTemplates = {};
+        let currentPrompt = '';
+        
+        // DOM elements
+        let elements = {};
+        
+        // Initialize when DOM is ready
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('📋 DOM loaded, initializing...');
+            initializeApp();
+        });
+        
+        function initializeApp() {
+            try {
+                // Get DOM elements
+                elements = {
+                    uploadArea: document.getElementById('uploadArea'),
+                    fileInput: document.getElementById('fileInput'),
+                    documentList: document.getElementById('documentList'),
+                    chatContainer: document.getElementById('chatContainer'),
+                    messageInput: document.getElementById('messageInput'),
+                    sendButton: document.getElementById('sendButton'),
+                    welcomeMessage: document.getElementById('welcomeMessage'),
+                    typingIndicator: document.getElementById('typingIndicator'),
+                    statusDot: document.getElementById('statusDot'),
+                    statusText: document.getElementById('statusText'),
+                    docCount: document.getElementById('docCount'),
+                    currentModel: document.getElementById('currentModel'),
+                    
+                    // Prompt management elements
+                    templateSelector: document.getElementById('templateSelector'),
+                    templateInfo: document.getElementById('templateInfo'),
+                    promptEditor: document.getElementById('promptEditor'),
+                    savePromptBtn: document.getElementById('savePromptBtn'),
+                    resetPromptBtn: document.getElementById('resetPromptBtn'),
+                    testPromptBtn: document.getElementById('testPromptBtn')
+                };
+                
+                console.log('✅ Elements found');
+                
+                // Bind events
+                bindEvents();
+                console.log('✅ Events bound');
+                
+                // Load initial data
+                loadInitialData();
+                console.log('✅ Loading initial data...');
+                
+            } catch (error) {
+                console.error('❌ Initialization failed:', error);
+                showNotification('Failed to initialize app: ' + error.message, 'error');
+            }
+        }
+        
+        function bindEvents() {
+            // File upload
+            elements.uploadArea.addEventListener('click', () => elements.fileInput.click());
+            elements.uploadArea.addEventListener('dragover', handleDragOver);
+            elements.uploadArea.addEventListener('dragleave', handleDragLeave);
+            elements.uploadArea.addEventListener('drop', handleDrop);
+            elements.fileInput.addEventListener('change', handleFileSelect);
+            
+            // Chat
+            elements.messageInput.addEventListener('input', handleInputChange);
+            elements.messageInput.addEventListener('keydown', handleKeyDown);
+            elements.sendButton.addEventListener('click', sendMessage);
+            
+            // Tab switching
+            document.querySelectorAll('.sidebar-tab').forEach(tab => {
+                tab.addEventListener('click', switchTab);
+            });
+            
+            // Prompt management
+            elements.templateSelector.addEventListener('change', handleTemplateSelect);
+            elements.savePromptBtn.addEventListener('click', savePrompt);
+            elements.resetPromptBtn.addEventListener('click', resetPrompt);
+            elements.testPromptBtn.addEventListener('click', testPrompt);
+        }
+        
+        async function loadInitialData() {
+            try {
+                await checkSystemStatus();
+                await loadDocuments();
+                await loadModels();
+                await loadPromptTemplates();
+                await loadCurrentPrompt();
+                console.log('✅ Initial data loaded');
+            } catch (error) {
+                console.error('❌ Failed to load initial data:', error);
+                showNotification('Some features may not work properly', 'warning');
+            }
+        }
+        
+        async function checkSystemStatus() {
+            try {
+                const response = await fetch('/api/status');
+                const status = await response.json();
+                
+                const allGood = Object.values(status).every(s => s === true);
+                
+                elements.statusDot.style.background = allGood ? '#4ade80' : '#ef4444';
+                elements.statusText.textContent = allGood ? 'Ready' : 'System Issues';
+                
+                console.log('📊 System status:', status);
+            } catch (error) {
+                console.error('❌ Status check failed:', error);
+                elements.statusDot.style.background = '#ef4444';
+                elements.statusText.textContent = 'Offline';
+            }
+        }
+        
+        async function loadModels() {
+            try {
+                const response = await fetch('/api/models');
+                const data = await response.json();
+                
+                elements.currentModel.textContent = data.current_model || 'Unknown';
+                console.log('🤖 Current model:', data.current_model);
+            } catch (error) {
+                console.error('❌ Models loading failed:', error);
+                elements.currentModel.textContent = 'Error loading';
+            }
+        }
+        
+        async function loadDocuments() {
+            try {
+                const response = await fetch('/api/documents');
+                const docs = await response.json();
+                
+                console.log('📄 Documents loaded:', docs);
+                renderDocuments(docs);
+                elements.docCount.textContent = docs ? docs.length : 0;
+            } catch (error) {
+                console.error('❌ Documents loading failed:', error);
+                elements.documentList.innerHTML = '<div style="color: rgba(255,255,255,0.5); text-align: center; padding: 20px; font-size: 14px;">Error loading documents</div>';
+                elements.docCount.textContent = '0';
+            }
+        }
+        
+        function renderDocuments(docs) {
+            if (!docs || docs.length === 0) {
+                elements.documentList.innerHTML = '<div style="color: rgba(255,255,255,0.5); text-align: center; padding: 20px; font-size: 14px;">No documents uploaded yet</div>';
+                return;
+            }
+            
+            elements.documentList.innerHTML = docs.map(doc => `
+                <div class="document-item">
+                    <div class="document-info">
+                        <div class="document-name">${escapeHtml(doc.filename || 'Unknown')}</div>
+                        <div class="document-meta">${doc.total_chunks || 0} chunks • ${doc.file_type || 'unknown'}</div>
+                    </div>
+                    <button class="view-btn" title="View Chunks" onclick="viewDocumentChunks('${escapeHtml(doc.filename || '')}')">👁️</button>
+                    <button class="delete-btn" onclick="deleteDocument('${escapeHtml(doc.filename || '')}')">×</button>
+                </div>
+            `).join('');
+        }
+        
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        // File upload handlers
+        function handleDragOver(e) {
+            e.preventDefault();
+            elements.uploadArea.style.borderColor = '#60a5fa';
+            elements.uploadArea.style.background = 'rgba(96, 165, 250, 0.1)';
+        }
+        
+        function handleDragLeave(e) {
+            e.preventDefault();
+            elements.uploadArea.style.borderColor = '';
+            elements.uploadArea.style.background = '';
+        }
+        
+        function handleDrop(e) {
+            e.preventDefault();
+            elements.uploadArea.style.borderColor = '';
+            elements.uploadArea.style.background = '';
+            const files = Array.from(e.dataTransfer.files);
+            uploadFiles(files);
+        }
+        
+        function handleFileSelect(e) {
+            const files = Array.from(e.target.files);
+            uploadFiles(files);
+        }
+        
+        async function uploadFiles(files) {
+            // Show loading spinner/message
+            elements.documentList.innerHTML = '<div style="color: #3b82f6; text-align: center; padding: 20px; font-size: 15px;"><span class="spinner" style="display:inline-block;width:18px;height:18px;border:3px solid #3b82f6;border-top:3px solid #e0e7ef;border-radius:50%;animation:spin 1s linear infinite;vertical-align:middle;margin-right:8px;"></span>Processing document(s)...</div>';
+            elements.uploadArea.style.pointerEvents = 'none';
+            elements.uploadArea.style.opacity = '0.6';
+            elements.fileInput.disabled = true;
+            for (const file of files) {
+                await uploadFile(file);
+            }
+            elements.uploadArea.style.pointerEvents = '';
+            elements.uploadArea.style.opacity = '';
+            elements.fileInput.disabled = false;
+            loadDocuments();
+        }
+        
+        async function uploadFile(file) {
+            try {
+                const formData = new FormData();
+                formData.append('file', file);
+                
+                const response = await fetch('/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                if (response.ok) {
+                    showNotification(`✅ ${file.name} uploaded successfully`, 'success');
+                } else {
+                    throw new Error(`Failed to upload ${file.name}`);
+                }
+            } catch (error) {
+                console.error('❌ Upload failed:', error);
+                showNotification(`❌ Failed to upload ${file.name}`, 'error');
+            }
+        }
+        
+        async function deleteDocument(filename) {
+            if (!confirm(`Delete ${filename}?`)) return;
+            
+            try {
+                const response = await fetch(`/api/documents/${filename}`, {
+                    method: 'DELETE'
+                });
+                
+                if (response.ok) {
+                    showNotification(`🗑️ ${filename} deleted`, 'success');
+                    loadDocuments();
+                } else {
+                    throw new Error('Delete failed');
+                }
+            } catch (error) {
+                console.error('❌ Delete failed:', error);
+                showNotification(`❌ Failed to delete ${filename}`, 'error');
+            }
+        }
+        
+        // Chat handlers
+        function handleInputChange() {
+            const hasText = elements.messageInput.value.trim().length > 0;
+            elements.sendButton.disabled = !hasText || isTyping;
+            
+            // Auto-resize
+            elements.messageInput.style.height = 'auto';
+            elements.messageInput.style.height = Math.min(elements.messageInput.scrollHeight, 120) + 'px';
+        }
+        
+        function handleKeyDown(e) {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                if (!elements.sendButton.disabled) {
+                    sendMessage();
+                }
+            }
+        }
+        
+        async function sendMessage() {
+            const message = elements.messageInput.value.trim();
+            if (!message || isTyping) return;
+            
+            elements.welcomeMessage.style.display = 'none';
+            addMessage('user', message);
+            elements.messageInput.value = '';
+            handleInputChange();
+            showTyping();
+            
+            try {
+                const response = await fetch('/query', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: `question=${encodeURIComponent(message)}`
+                });
+                
+                const data = await response.json();
+                
+                if (data.error) {
+                    addMessage('assistant', `❌ ${data.error}`);
+                } else {
+                    addMessage('assistant', data.answer, data.sources);
+                }
+            } catch (error) {
+                console.error('❌ Query failed:', error);
+                addMessage('assistant', '❌ Sorry, I encountered an error processing your question.');
+            } finally {
+                hideTyping();
+            }
+        }
+        
+        function addMessage(sender, content, sources = []) {
+            const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            const avatar = sender === 'user' ? 'You' : 'AI';
+            
+            const messageEl = document.createElement('div');
+            messageEl.className = `message ${sender}`;
+            
+            let sourcesHtml = '';
+            if (sources && sources.length > 0) {
+                sourcesHtml = `
+                    <div class="message-sources">
+                        <div class="sources-label">Sources:</div>
+                        <div class="source-tags">
+                            ${sources.map(source => `<span class="source-tag">${escapeHtml(source)}</span>`).join('')}
+                        </div>
+                    </div>
+                `;
+            }
+            
+            messageEl.innerHTML = `
+                <div class="message-avatar">${avatar}</div>
+                <div class="message-content">
+                    <div class="message-bubble">
+                        <div class="message-text">${formatMessage(content)}</div>
+                        ${sourcesHtml}
+                    </div>
+                    <div class="message-timestamp">${timestamp}</div>
+                </div>
+            `;
+            
+            elements.chatContainer.appendChild(messageEl);
+            scrollToBottom();
+        }
+        
+        function formatMessage(content) {
+            return escapeHtml(content)
+                .replace(/\n/g, '<br>')
+                .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+                .replace(/\*(.*?)\*/g, '<em>$1</em>');
+        }
+        
+        function showTyping() {
+            isTyping = true;
+            elements.typingIndicator.style.display = 'flex';
+            elements.sendButton.disabled = true;
+            scrollToBottom();
+        }
+        
+        function hideTyping() {
+            isTyping = false;
+            elements.typingIndicator.style.display = 'none';
+            handleInputChange();
+        }
+        
+        function scrollToBottom() {
+            setTimeout(() => {
+                elements.chatContainer.scrollTop = elements.chatContainer.scrollHeight;
+            }, 100);
+        }
+        
+        function showNotification(message, type = 'info') {
+            const notification = document.createElement('div');
+            notification.className = `notification ${type}`;
+            notification.textContent = message;
+            document.body.appendChild(notification);
+            
+            setTimeout(() => notification.remove(), 3000);
+        }
+        
+        // Tab switching
+        function switchTab(e) {
+            const tabName = e.target.dataset.tab;
+            
+            // Update tab buttons
+            document.querySelectorAll('.sidebar-tab').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            e.target.classList.add('active');
+
+            // Update tab content
+            document.querySelectorAll('.tab-content').forEach(content => {
+                content.classList.remove('active');
+            });
+            document.getElementById(tabName + 'Tab').classList.add('active');
+        }
+        
+        // Prompt management functions
+        async function loadPromptTemplates() {
+            try {
+                const response = await fetch('/api/prompt/templates');
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                
+                promptTemplates = await response.json();
+                
+                elements.templateSelector.innerHTML = '<option value="">Select a template...</option>';
+                if (promptTemplates && typeof promptTemplates === 'object') {
+                    Object.entries(promptTemplates).forEach(([key, template]) => {
+                        const option = document.createElement('option');
+                        option.value = key;
+                        option.textContent = template.name || key;
+                        elements.templateSelector.appendChild(option);
+                    });
+                }
+                console.log('✅ Prompt templates loaded');
+            } catch (error) {
+                console.error('❌ Failed to load prompt templates:', error);
+            }
+        }
+        
+        async function loadCurrentPrompt() {
+            try {
+                const response = await fetch('/api/prompt');
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                
+                const data = await response.json();
+                currentPrompt = data.prompt || '';
+                elements.promptEditor.value = currentPrompt;
+                console.log('✅ Current prompt loaded');
+            } catch (error) {
+                console.error('❌ Failed to load current prompt:', error);
+            }
+        }
+        
+        function handleTemplateSelect() {
+            const selectedTemplate = elements.templateSelector.value;
+            if (selectedTemplate && promptTemplates[selectedTemplate]) {
+                const template = promptTemplates[selectedTemplate];
+                elements.promptEditor.value = template.prompt;
+                elements.templateInfo.innerHTML = `
+                    <strong>${template.name}</strong><br>
+                    ${template.description}
+                `;
+            } else {
+                elements.templateInfo.textContent = 'Choose a template to customize how the AI responds to your questions.';
+            }
+        }
+        
+        async function savePrompt() {
+            const newPrompt = elements.promptEditor.value.trim();
+            if (!newPrompt) {
+                showNotification('❌ Prompt cannot be empty', 'error');
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/prompt', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ prompt: newPrompt })
+                });
+
+                if (response.ok) {
+                    currentPrompt = newPrompt;
+                    showNotification('✅ AI behavior updated successfully', 'success');
+                } else {
+                    throw new Error('Failed to save prompt');
+                }
+            } catch (error) {
+                console.error('❌ Save prompt failed:', error);
+                showNotification('❌ Failed to save prompt', 'error');
+            }
+        }
+        
+        async function resetPrompt() {
+            if (!confirm('Reset to default AI behavior?')) return;
+
+            try {
+                const response = await fetch('/api/prompt/reset', { method: 'POST' });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    currentPrompt = data.prompt;
+                    elements.promptEditor.value = currentPrompt;
+                    elements.templateSelector.value = '';
+                    elements.templateInfo.textContent = 'Choose a template to customize how the AI responds to your questions.';
+                    showNotification('✅ AI behavior reset to default', 'success');
+                }
+            } catch (error) {
+                console.error('❌ Reset prompt failed:', error);
+                showNotification('❌ Failed to reset prompt', 'error');
+            }
+        }
+        
+        async function testPrompt() {
+            const testPrompt = elements.promptEditor.value.trim();
+            if (!testPrompt) {
+                showNotification('❌ Enter a prompt to test', 'error');
+                return;
+            }
+
+            // Switch to chat tab and send a test message
+            document.querySelector('.sidebar-tab[data-tab="documents"]').click();
+            elements.messageInput.value = 'Please introduce yourself and explain how you will help me with my documents.';
+            
+            // Save the prompt for testing
+            await savePrompt();
+            
+            // Send the test message
+            sendMessage();
+            
+            showNotification('🧪 Test prompt sent! Check the chat response.', 'info');
+        }
+        
+        console.log('✅ Document AI Assistant initialized');
+        
+        // Chunk viewer functions
+        let currentDocument = '';
+        
+        async function viewDocumentChunks(filename) {
+            currentDocument = filename;
+            document.getElementById('modalTitle').textContent = `Chunks: ${filename}`;
+            document.getElementById('chunkModal').style.display = 'block';
+            
+            try {
+                const response = await fetch(`/api/documents/${encodeURIComponent(filename)}/chunks`);
+                const data = await response.json();
+                
+                if (response.ok) {
+                    displayChunks(data.chunks, false);
+                    document.getElementById('chunkStats').innerHTML = `
+                        <strong>${data.filename}</strong><br>
+                        Total chunks: ${data.total_chunks}<br>
+                        Average chunk size: ${Math.round(data.chunks.reduce((sum, chunk) => sum + chunk.length, 0) / data.chunks.length)} characters
+                    `;
+                } else {
+                    document.getElementById('chunkList').innerHTML = `<div class="chunk-item"><div class="chunk-content">Error: ${data.error}</div></div>`;
+                }
+            } catch (error) {
+                console.error('❌ Failed to load chunks:', error);
+                document.getElementById('chunkList').innerHTML = `<div class="chunk-item"><div class="chunk-content">Error loading chunks: ${error.message}</div></div>`;
+            }
+        }
+        
+        async function searchChunks() {
+            const query = document.getElementById('chunkSearchInput').value.trim();
+            if (!query || !currentDocument) return;
+            
+            try {
+                const response = await fetch(`/api/documents/${encodeURIComponent(currentDocument)}/search?q=${encodeURIComponent(query)}&n=10`);
+                const data = await response.json();
+                
+                if (response.ok) {
+                    displayChunks(data.results, true);
+                    document.getElementById('chunkStats').innerHTML = `
+                        <strong>Search Results for "${query}"</strong><br>
+                        Found ${data.results.length} relevant chunks in ${data.filename}
+                    `;
+                } else {
+                    document.getElementById('chunkList').innerHTML = `<div class="chunk-item"><div class="chunk-content">Search error: ${data.error}</div></div>`;
+                }
+            } catch (error) {
+                console.error('❌ Search failed:', error);
+                document.getElementById('chunkList').innerHTML = `<div class="chunk-item"><div class="chunk-content">Search failed: ${error.message}</div></div>`;
+            }
+        }
+        
+        async function viewAllChunks() {
+            document.getElementById('chunkSearchInput').value = '';
+            await viewDocumentChunks(currentDocument);
+        }
+        
+        function displayChunks(chunks, showSimilarity = false) {
+            const chunkList = document.getElementById('chunkList');
+            
+            if (!chunks || chunks.length === 0) {
+                chunkList.innerHTML = '<div class="chunk-item"><div class="chunk-content">No chunks found.</div></div>';
+                return;
+            }
+            
+            chunkList.innerHTML = chunks.map(chunk => {
+                const similarityHtml = showSimilarity ? 
+                    `<span class="similarity-score">${Math.round(chunk.similarity_score * 100)}% match</span>` : '';
+                
+                return `
+                    <div class="chunk-item">
+                        <div class="chunk-header">
+                            <div class="chunk-meta">
+                                Chunk ${chunk.index + 1} • ${chunk.length} characters
+                                ${similarityHtml}
+                            </div>
+                        </div>
+                        <div class="chunk-content">${escapeHtml(chunk.text)}</div>
+                    </div>
+                `;
+            }).join('');
+        }
+        
+        function closeChunkModal() {
+            document.getElementById('chunkModal').style.display = 'none';
+            currentDocument = '';
+        }
+        
+        // Close modal when clicking outside
+        window.onclick = function(event) {
+            const modal = document.getElementById('chunkModal');
+            if (event.target == modal) {
+                closeChunkModal();
+            }
+        }
+        
+        // Allow Enter key in chunk search
+        document.addEventListener('DOMContentLoaded', function() {
+            const chunkSearchInput = document.getElementById('chunkSearchInput');
+            if (chunkSearchInput) {
+                chunkSearchInput.addEventListener('keypress', function(e) {
+                    if (e.key === 'Enter') {
+                        searchChunks();
+                    }
+                });
+            }
+        });
+    </script>
+</body>
+</html>

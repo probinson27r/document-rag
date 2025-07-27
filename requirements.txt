@@ -1,0 +1,10 @@
+flask
+requests
+sentence-transformers
+chromadb
+PyMuPDF
+faiss-cpu
+protobuf==4.24.4
+openai
+ollama
+anthropic

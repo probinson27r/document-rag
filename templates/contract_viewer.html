@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>View Contract - ED19024 AI Assistant</title>
+    <style>
+        html, body {
+            width: 100vw;
+            height: 100vh;
+            margin: 0;
+            padding: 0;
+            overflow-x: hidden;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f9fafb;
+        }
+        .topbar {
+            width: 100vw; display: flex; justify-content: flex-end; align-items: center;
+            background: rgba(255,255,255,0.1); padding: 16px 30px; position: relative;
+            box-sizing: border-box;
+        }
+        .back-link {
+            color: #3b82f6; background: white; border-radius: 6px; padding: 8px 18px;
+            font-size: 14px; font-weight: 500; text-decoration: none; box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+            transition: background 0.2s;
+        }
+        .back-link:hover {
+            background: #e0e7ef;
+        }
+        .contract-viewer-label {
+            color: #1f2937; font-size: 15px; font-weight: 600; margin: 18px 0 8px 0; text-align: center;
+        }
+        .contract-viewer {
+            width: 100vw;
+            height: calc(100vh - 56px);
+            border: none;
+            background: #fff;
+            display: block;
+            max-width: 100vw;
+            box-sizing: border-box;
+            overflow-x: hidden;
+        }
+        .contract-placeholder {
+            color: #ef4444; font-size: 15px; text-align: center; margin: 20px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="topbar">
+        <a href="/chat" class="back-link">← Back to Chat</a>
+    </div>
+    <div class="contract-viewer-label">Current Contract</div>
+    <iframe id="contractViewer" src="/contract/latest" class="contract-viewer" frameborder="0"></iframe>
+    <div id="contractPlaceholder" class="contract-placeholder" style="display:none;">No contract uploaded yet.</div>
+    <script>
+    document.addEventListener('DOMContentLoaded', function() {
+        var iframe = document.getElementById('contractViewer');
+        var placeholder = document.getElementById('contractPlaceholder');
+        iframe.onload = function() {
+            if (iframe.contentDocument && iframe.contentDocument.body && iframe.contentDocument.body.innerText.match(/No contract uploaded yet|Error/)) {
+                iframe.style.display = 'none';
+                placeholder.style.display = 'block';
+            } else {
+                iframe.style.display = 'block';
+                placeholder.style.display = 'none';
+            }
+        };
+        iframe.onerror = function() {
+            iframe.style.display = 'none';
+            placeholder.style.display = 'block';
+        };
+    });
+    </script>
+</body>
+</html> 
