@@ -439,6 +439,7 @@
                     console.log(`📚 Loaded ${data.history.length} messages from server session`);
                     conversationHistory = data.history;
                     renderChatHistory();
+                    debugChatHistory(); // Debug the loaded history
                     return;
                 }
                 
@@ -451,6 +452,7 @@
                             console.log(`📚 Loaded ${parsedHistory.length} messages from localStorage`);
                             conversationHistory = parsedHistory;
                             renderChatHistory();
+                            debugChatHistory(); // Debug the loaded history
                             // Sync to server
                             await syncHistoryToServer();
                         }
@@ -469,6 +471,7 @@
                         if (Array.isArray(parsedHistory) && parsedHistory.length > 0) {
                             conversationHistory = parsedHistory;
                             renderChatHistory();
+                            debugChatHistory(); // Debug the loaded history
                         }
                     }
                 } catch (e) {
@@ -506,13 +509,30 @@
 
         async function syncHistoryToServer() {
             try {
-                // Send each message to server
+                console.log(`🔄 Syncing ${conversationHistory.length} messages to server`);
+                
+                // Clear server history first to prevent duplicates
+                await fetch('/api/chat/history', { method: 'DELETE' });
+                
+                // Send each message to server with delay to prevent race conditions
                 for (const message of conversationHistory) {
-                    await fetch('/api/chat/history', {
+                    console.log(`🔄 Syncing message:`, {
+                        sender: message.sender,
+                        contentLength: message.content.length
+                    });
+                    
+                    const response = await fetch('/api/chat/history', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify(message)
                     });
+                    
+                    if (!response.ok) {
+                        console.error(`❌ Failed to sync message: ${response.status} ${response.statusText}`);
+                    }
+                    
+                    // Small delay to prevent overwhelming the server
+                    await new Promise(resolve => setTimeout(resolve, 100));
                 }
                 console.log('✅ Chat history synced to server');
             } catch (error) {
@@ -850,6 +870,37 @@
         window.importChatHistory = importChatHistory;
         window.showChatHistoryMenu = showChatHistoryMenu;
         window.hideChatHistoryMenu = hideChatHistoryMenu;
+
+        // Debug function to verify chat history state
+        function debugChatHistory() {
+            console.log('🔍 === CHAT HISTORY DEBUG ===');
+            console.log(`📊 Total messages in memory: ${conversationHistory.length}`);
+            
+            const userMessages = conversationHistory.filter(msg => msg.sender === 'user');
+            const assistantMessages = conversationHistory.filter(msg => msg.sender === 'assistant');
+            
+            console.log(`👤 User messages: ${userMessages.length}`);
+            console.log(`🤖 Assistant messages: ${assistantMessages.length}`);
+            
+            if (userMessages.length > 0) {
+                console.log('👤 User messages:');
+                userMessages.forEach((msg, index) => {
+                    console.log(`  ${index + 1}. "${msg.content.substring(0, 50)}${msg.content.length > 50 ? '...' : ''}" (${msg.timestamp})`);
+                });
+            }
+            
+            if (assistantMessages.length > 0) {
+                console.log('🤖 Assistant messages:');
+                assistantMessages.forEach((msg, index) => {
+                    console.log(`  ${index + 1}. "${msg.content.substring(0, 50)}${msg.content.length > 50 ? '...' : ''}" (${msg.timestamp})`);
+                });
+            }
+            
+            console.log('🔍 === END DEBUG ===');
+        }
+        
+        // Make debug function available globally
+        window.debugChatHistory = debugChatHistory;
 
         console.log('✅ Legal Document AI Assistant with persistent chat history initialized');
     </script>
