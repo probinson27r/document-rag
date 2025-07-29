@@ -465,6 +465,10 @@
                             console.log(`📋 Loaded messages:`, conversationHistory.map((msg, i) => 
                                 `${i + 1}. [${msg.sender}] ${msg.content.substring(0, 30)}...`
                             ));
+                            
+                            // Render the loaded history
+                            console.log('🎨 Rendering loaded chat history...');
+                            renderChatHistory();
                         } else {
                             console.log('📋 No messages in loaded array');
                         }
