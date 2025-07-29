@@ -31,15 +31,19 @@ ollama_client = None
 claude_client = None
 openai_client = None
 jan_client = None
+private_gpt4_client = None  # New private GPT-4 client
 current_model = 'mistral:7b'  # Default to local model
 openai_model_name = 'gpt-4o'  # Default OpenAI model name
 jan_model_name = 'gpt-4'  # Default Jan.ai model name
+private_gpt4_model_name = 'gpt-4o'  # Private GPT-4 model name
+private_gpt4_base_url = 'https://doe-srt-sensai-nprd-apim.azure-api.net/doe-srt-sensai-nprd-oai/openai/deployments/gpt-4o/chat/completions?api-version=2025-03-01-preview'
 user_instructions = """You are Ed-AI, an AI assistant with expertise in technology, legal document analysis and ITIL. I aim to be helpful, honest, and direct while maintaining a warm, conversational tone.
 
 When analyzing legal documents, I:
 - Always be positive and helpful
-- Determine if the user is the customer or the vendor
+- Observe and reference the supplier behaviours in section 3.3 of the contract
 - Use the Objectivesd outlined in section 3.2 of the contract to answer questions about the contract
+- Determine if the user is the customer or the vendor
 - The customer is the Department of Education
 - The vendor is LIFT Alliance
 - Refer to the contract as the ED19024 contract
@@ -56,7 +60,7 @@ I'm here to help you understand complex legal documents. Let me analyze the prov
 
 def initialize_rag_system():
     """Initialize the RAG system with legal document processing"""
-    global embedding_model, chroma_client, collection, ollama_client, claude_client, openai_client, jan_client
+    global embedding_model, chroma_client, collection, ollama_client, claude_client, openai_client, jan_client, private_gpt4_client
     try:
         embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
         logger.info("Embedding model loaded")
@@ -81,6 +85,18 @@ def initialize_rag_system():
             logger.info("OpenAI client initialized")
         else:
             logger.info("No OPENAI_API_KEY found - OpenAI API not available")
+        
+        # Initialize private GPT-4 client
+        private_gpt4_api_key = os.getenv('PRIVATE_GPT4_API_KEY')
+        if private_gpt4_api_key:
+            private_gpt4_client = {
+                'base_url': private_gpt4_base_url,
+                'api_key': private_gpt4_api_key
+            }
+            logger.info("Private GPT-4 client initialized")
+        else:
+            logger.info("No PRIVATE_GPT4_API_KEY found - Private GPT-4 API not available")
+        
         try:
             response = requests.get('http://localhost:1337/v1/models', timeout=5)
             if response.status_code == 200:
@@ -277,6 +293,36 @@ Let me help you understand this:"""
                 answer = result['choices'][0]['message']['content']
             else:
                 raise Exception(f"Jan.ai API error: {response.status_code} - {response.text}")
+                
+        elif current_model == 'Private GPT-4' and private_gpt4_client:
+            # Use Private GPT-4 API with user instructions
+            headers = {
+                'Content-Type': 'application/json',
+                'api-key': private_gpt4_client['api_key']
+            }
+            
+            payload = {
+                'model': private_gpt4_model_name,
+                'messages': [
+                    {"role": "system", "content": user_instructions},
+                    {"role": "user", "content": f"Context from the legal document:\n{context}\n\nYour question: {question}\nLet me help you understand this:"}
+                ],
+                'max_tokens': 1000,
+                'temperature': 0.7
+            }
+            
+            response = requests.post(
+                private_gpt4_client['base_url'],
+                headers=headers,
+                json=payload,
+                timeout=30
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                answer = result['choices'][0]['message']['content']
+            else:
+                raise Exception(f"Private GPT-4 API error: {response.status_code} - {response.text}")
         else:
             # Use local Ollama model with user instructions
             prompt = f"""<s>[INST] {user_instructions}
@@ -290,7 +336,7 @@ Let me help you understand this: [/INST]"""
             
             # Map display names to actual model names for Ollama
             ollama_model = current_model
-            if current_model in ['Claude Sonnet 4', 'OpenAI GPT-4', 'Jan.ai GPT-4']:
+            if current_model in ['Claude Sonnet 4', 'OpenAI GPT-4', 'Jan.ai GPT-4', 'Private GPT-4']:
                 ollama_model = 'mistral:7b'  # Fallback to local model if external APIs not available
             
             response = ollama_client.chat(
@@ -341,6 +387,8 @@ def api_models():
             available_models.append('OpenAI GPT-4')
         if jan_client:
             available_models.append('Jan.ai GPT-4')
+        if private_gpt4_client:
+            available_models.append('Private GPT-4')
         
         return jsonify({
             'current_model': current_model,
@@ -348,7 +396,8 @@ def api_models():
             'embedding_model': 'all-MiniLM-L6-v2',
             'claude_available': claude_client is not None,
             'openai_available': openai_client is not None,
-            'jan_ai_available': jan_client is not None
+            'jan_ai_available': jan_client is not None,
+            'private_gpt4_available': private_gpt4_client is not None
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -373,6 +422,8 @@ def switch_model():
             available_models.append('OpenAI GPT-4')
         if jan_client:
             available_models.append('Jan.ai GPT-4')
+        if private_gpt4_client:
+            available_models.append('Private GPT-4')
         
         if new_model not in available_models:
             return jsonify({'error': f'Model {new_model} not available'}), 400

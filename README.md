@@ -53,6 +53,7 @@ A comprehensive Retrieval-Augmented Generation (RAG) system specifically designe
    ```bash
    export OPENAI_API_KEY="your-openai-key"
    export ANTHROPIC_API_KEY="your-claude-key"
+   export PRIVATE_GPT4_API_KEY="your-private-gpt4-key"
    ```
 
 5. **Start the application**
@@ -140,6 +141,7 @@ The system uses an advanced chunking strategy specifically designed for legal do
 - **OpenAI**: GPT-4, GPT-3.5-turbo
 - **Anthropic**: Claude Sonnet 4
 - **Jan.ai**: GPT-4 (local deployment)
+- **Private GPT-4**: Custom Azure OpenAI deployment
 
 ## 📝 Usage Examples
 
