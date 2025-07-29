@@ -499,28 +499,36 @@
         }
 
         function renderChatHistory() {
-            console.log(`🎨 Rendering chat history with ${conversationHistory.length} messages`);
+            console.log(`🎨 renderChatHistory called with ${conversationHistory.length} messages`);
             
-            if (conversationHistory.length === 0) {
-                elements.welcomeMessage.style.display = 'block';
-                return;
-            }
-
+            // Hide welcome message
             elements.welcomeMessage.style.display = 'none';
             
             // Clear existing messages (except welcome)
             const existingMessages = elements.chatContainer.querySelectorAll('.message');
+            console.log(`🗑️ Clearing ${existingMessages.length} existing messages from DOM`);
             existingMessages.forEach(msg => msg.remove());
 
             // Render all messages from history
             conversationHistory.forEach((message, index) => {
-                console.log(`🎨 Rendering message ${index + 1}:`, {
+                console.log(`🎨 Rendering message ${index + 1}/${conversationHistory.length}:`, {
                     sender: message.sender,
                     contentLength: message.content.length,
-                    timestamp: message.timestamp
+                    timestamp: message.timestamp,
+                    contentPreview: message.content.substring(0, 50) + '...'
                 });
                 renderMessage(message.sender, message.content, message.sources, message.timestamp);
             });
+
+            // Verify rendering
+            const renderedMessages = elements.chatContainer.querySelectorAll('.message');
+            console.log(`✅ Rendering complete: ${renderedMessages.length} messages in DOM vs ${conversationHistory.length} in storage`);
+            
+            if (renderedMessages.length !== conversationHistory.length) {
+                console.error(`❌ RENDERING MISMATCH: ${renderedMessages.length} in DOM vs ${conversationHistory.length} in storage`);
+                console.log('🔍 Conversation history:', conversationHistory);
+                console.log('🔍 Rendered messages:', Array.from(renderedMessages).map(el => el.textContent.substring(0, 50)));
+            }
 
             scrollToBottom();
         }
@@ -731,45 +739,56 @@
         }
 
         function renderMessage(sender, content, sources = [], timestamp = null) {
-            console.log(`🎨 renderMessage called:`, {
-                sender: sender,
-                contentLength: content.length,
-                chatContainerExists: !!elements.chatContainer
-            });
-            
-            const messageTime = timestamp ? new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-            const avatar = sender === 'user' ? 'You' : 'AI';
-            const messageEl = document.createElement('div');
-            messageEl.className = `message ${sender}`;
-            
-            let sourcesHtml = '';
-            if (sources && sources.length > 0) {
-                sourcesHtml = `
-                    <div class="message-sources">
-                        <div class="sources-label">Sources:</div>
-                        <ul class="source-list">
-                            ${sources.map(source => `<li class="source-tag">${escapeHtml(source)}</li>`).join('')}
-                        </ul>
+            try {
+                console.log(`🎨 renderMessage called:`, {
+                    sender: sender,
+                    contentLength: content.length,
+                    chatContainerExists: !!elements.chatContainer,
+                    contentPreview: content.substring(0, 50) + '...'
+                });
+                
+                if (!elements.chatContainer) {
+                    console.error('❌ Chat container not found!');
+                    return;
+                }
+                
+                const messageTime = timestamp ? new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                const avatar = sender === 'user' ? 'You' : 'AI';
+                const messageEl = document.createElement('div');
+                messageEl.className = `message ${sender}`;
+                
+                let sourcesHtml = '';
+                if (sources && sources.length > 0) {
+                    sourcesHtml = `
+                        <div class="message-sources">
+                            <div class="sources-label">Sources:</div>
+                            <ul class="source-list">
+                                ${sources.map(source => `<li class="source-tag">${escapeHtml(source)}</li>`).join('')}
+                            </ul>
+                        </div>
+                    `;
+                }
+                
+                messageEl.innerHTML = `
+                    <div class="message-avatar">${avatar}</div>
+                    <div class="message-content">
+                        <div class="message-bubble">
+                            <div class="message-text">${formatMessage(content)}</div>
+                            ${sourcesHtml}
+                        </div>
+                        <div class="message-timestamp">${messageTime}</div>
                     </div>
                 `;
+                
+                console.log(`🎨 Appending message to chat container. Container has ${elements.chatContainer.children.length} children`);
+                elements.chatContainer.appendChild(messageEl);
+                console.log(`✅ Message appended successfully. Container now has ${elements.chatContainer.children.length} children`);
+                
+                scrollToBottom();
+            } catch (error) {
+                console.error('❌ Error in renderMessage:', error);
+                console.error('❌ Message details:', { sender, contentLength: content.length, contentPreview: content.substring(0, 50) });
             }
-            
-            messageEl.innerHTML = `
-                <div class="message-avatar">${avatar}</div>
-                <div class="message-content">
-                    <div class="message-bubble">
-                        <div class="message-text">${formatMessage(content)}</div>
-                        ${sourcesHtml}
-                    </div>
-                    <div class="message-timestamp">${messageTime}</div>
-                </div>
-            `;
-            
-            console.log(`🎨 Appending message to chat container. Container has ${elements.chatContainer.children.length} children`);
-            elements.chatContainer.appendChild(messageEl);
-            console.log(`🎨 Message appended. Container now has ${elements.chatContainer.children.length} children`);
-            
-            scrollToBottom();
         }
 
         function formatMessage(content) {
@@ -1018,11 +1037,55 @@
             }
         }
         
+        // Function to identify missing messages
+        function identifyMissingMessage() {
+            console.log('🔍 === IDENTIFYING MISSING MESSAGE ===');
+            
+            const domMessages = elements.chatContainer.querySelectorAll('.message');
+            console.log(`📊 Storage has ${conversationHistory.length} messages`);
+            console.log(`📊 DOM has ${domMessages.length} messages`);
+            
+            if (domMessages.length === conversationHistory.length) {
+                console.log('✅ No missing messages detected');
+                return;
+            }
+            
+            console.log('❌ Missing message detected!');
+            console.log('📋 Storage messages:');
+            conversationHistory.forEach((msg, index) => {
+                console.log(`  ${index + 1}. [${msg.sender}] ${msg.content.substring(0, 50)}...`);
+            });
+            
+            console.log('📋 DOM messages:');
+            domMessages.forEach((msgEl, index) => {
+                const sender = msgEl.classList.contains('user') ? 'user' : 'assistant';
+                const content = msgEl.querySelector('.message-text')?.textContent || 'No content';
+                console.log(`  ${index + 1}. [${sender}] ${content.substring(0, 50)}...`);
+            });
+            
+            // Try to identify which message is missing
+            const domTexts = Array.from(domMessages).map(el => 
+                el.querySelector('.message-text')?.textContent || ''
+            );
+            
+            const missingIndex = conversationHistory.findIndex((msg, index) => {
+                const domText = domTexts[index];
+                return !domText || !domText.includes(msg.content.substring(0, 20));
+            });
+            
+            if (missingIndex !== -1) {
+                console.log(`❌ Missing message is at index ${missingIndex}:`, conversationHistory[missingIndex]);
+            }
+            
+            console.log('🔍 === END MISSING MESSAGE ANALYSIS ===');
+        }
+        
         // Make debug functions available globally
         window.debugChatHistory = debugChatHistory;
         window.checkArrayIntegrity = checkArrayIntegrity;
         window.checkLocalStorage = checkLocalStorage;
         window.testRender = testRender;
+        window.identifyMissingMessage = identifyMissingMessage;
 
         console.log('✅ Legal Document AI Assistant with persistent chat history initialized');
     </script>
