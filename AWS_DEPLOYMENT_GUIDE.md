@@ -253,6 +253,18 @@ aws ecs list-tasks --cluster legal-rag-cluster
 To remove all resources:
 
 ```bash
+# Check what resources exist first
+./check-aws-resources.sh
+
+# Destroy all resources
+./destroy-aws.sh
+```
+
+### Manual Cleanup Commands
+
+If you prefer to clean up manually:
+
+```bash
 # Delete ECS service
 aws ecs update-service --cluster legal-rag-cluster --service legal-rag-service --desired-count 0
 aws ecs delete-service --cluster legal-rag-cluster --service legal-rag-service
@@ -271,6 +283,32 @@ aws secretsmanager delete-secret --secret-id legal-rag/anthropic-api-key
 aws secretsmanager delete-secret --secret-id legal-rag/openai-api-key
 aws secretsmanager delete-secret --secret-id legal-rag/private-gpt4-api-key
 ```
+
+## Resource Management Scripts
+
+### Check Resources
+```bash
+./check-aws-resources.sh
+```
+This script shows you what AWS resources currently exist for the Legal Document RAG system.
+
+### Destroy Resources
+```bash
+./destroy-aws.sh
+```
+This script safely removes all AWS resources created by the deployment, including:
+- ECS service and cluster
+- Task definitions
+- ECR repository and images
+- CloudWatch log groups
+- AWS Secrets Manager secrets
+- Local deployment files
+
+### Safety Features
+- **Graceful shutdown**: Scales down services before deletion
+- **Resource verification**: Checks if resources exist before attempting deletion
+- **Error handling**: Continues even if some resources don't exist
+- **Verification**: Confirms cleanup was successful
 
 ## Support
 

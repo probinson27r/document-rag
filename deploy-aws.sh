@@ -6,7 +6,7 @@
 set -e
 
 # Configuration
-AWS_REGION="us-east-1"  # Change to your preferred region
+AWS_REGION="ap-southeast-2"  # Change to your preferred region
 AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 ECR_REPOSITORY_NAME="legal-document-rag"
 IMAGE_TAG="latest"
