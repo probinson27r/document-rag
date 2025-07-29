@@ -368,7 +368,15 @@
                     welcomeMessage: document.getElementById('welcomeMessage'),
                     typingIndicator: document.getElementById('typingIndicator'),
                 };
-                console.log('✅ Elements found');
+                
+                console.log('✅ Elements found:', {
+                    chatContainer: !!elements.chatContainer,
+                    messageInput: !!elements.messageInput,
+                    sendButton: !!elements.sendButton,
+                    welcomeMessage: !!elements.welcomeMessage,
+                    typingIndicator: !!elements.typingIndicator
+                });
+                
                 bindEvents();
                 console.log('✅ Events bound');
                 loadInitialData();
@@ -723,6 +731,12 @@
         }
 
         function renderMessage(sender, content, sources = [], timestamp = null) {
+            console.log(`🎨 renderMessage called:`, {
+                sender: sender,
+                contentLength: content.length,
+                chatContainerExists: !!elements.chatContainer
+            });
+            
             const messageTime = timestamp ? new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
             const avatar = sender === 'user' ? 'You' : 'AI';
             const messageEl = document.createElement('div');
@@ -751,7 +765,10 @@
                 </div>
             `;
             
+            console.log(`🎨 Appending message to chat container. Container has ${elements.chatContainer.children.length} children`);
             elements.chatContainer.appendChild(messageEl);
+            console.log(`🎨 Message appended. Container now has ${elements.chatContainer.children.length} children`);
+            
             scrollToBottom();
         }
 
@@ -986,10 +1003,26 @@
             console.log('🔍 === END LOCALSTORAGE CHECK ===');
         }
         
+        // Test function to manually trigger rendering
+        function testRender() {
+            console.log('🧪 Testing render function...');
+            console.log(`📊 conversationHistory length: ${conversationHistory.length}`);
+            console.log(`🎯 chatContainer exists: ${!!elements.chatContainer}`);
+            
+            if (conversationHistory.length > 0) {
+                console.log('🧪 Rendering first message as test...');
+                const firstMessage = conversationHistory[0];
+                renderMessage(firstMessage.sender, firstMessage.content, firstMessage.sources, firstMessage.timestamp);
+            } else {
+                console.log('🧪 No messages to render');
+            }
+        }
+        
         // Make debug functions available globally
         window.debugChatHistory = debugChatHistory;
         window.checkArrayIntegrity = checkArrayIntegrity;
         window.checkLocalStorage = checkLocalStorage;
+        window.testRender = testRender;
 
         console.log('✅ Legal Document AI Assistant with persistent chat history initialized');
     </script>
