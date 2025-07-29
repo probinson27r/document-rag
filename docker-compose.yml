@@ -1,0 +1,24 @@
+version: '3.8'
+
+services:
+  legal-rag-app:
+    build: .
+    ports:
+      - "5001:5001"
+    environment:
+      - FLASK_ENV=development
+      - SECRET_KEY=dev-secret-key-change-in-production
+      # Add your API keys here for testing
+      # - ANTHROPIC_API_KEY=your_claude_key
+      # - OPENAI_API_KEY=your_openai_key
+      # - PRIVATE_GPT4_API_KEY=your_private_gpt4_key
+    volumes:
+      - ./uploads:/app/uploads
+      - ./chroma_db:/app/chroma_db
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5001/api/status"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s 
