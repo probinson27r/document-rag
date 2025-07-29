@@ -236,12 +236,74 @@
         .contract-link:hover {
             background: #e0e7ef;
         }
+        
+        /* Chat History Menu Styles */
+        .chat-history-menu {
+            position: absolute;
+            top: 100%;
+            right: 0;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+            padding: 8px 0;
+            min-width: 180px;
+            z-index: 1000;
+            display: none;
+            border: 1px solid rgba(0,0,0,0.1);
+        }
+        
+        .chat-history-menu.show {
+            display: block;
+        }
+        
+        .chat-history-menu button {
+            width: 100%;
+            padding: 8px 16px;
+            border: none;
+            background: none;
+            text-align: left;
+            cursor: pointer;
+            font-size: 14px;
+            color: #1f2937;
+            transition: background 0.2s;
+        }
+        
+        .chat-history-menu button:hover {
+            background: #f3f4f6;
+        }
+        
+        .chat-history-menu button.danger {
+            color: #ef4444;
+        }
+        
+        .chat-history-menu button.danger:hover {
+            background: #fee2e2;
+        }
+        
+        .chat-history-menu .divider {
+            height: 1px;
+            background: #e5e7eb;
+            margin: 4px 0;
+        }
+        
+        .chat-history-container {
+            position: relative;
+        }
     </style>
 </head>
 <body>
     <div class="app">
         <div class="topbar">
             <a href="/contract" class="contract-link">📄 View Contract</a>
+            <div class="chat-history-container">
+                <button class="configure-link" onclick="showChatHistoryMenu()" style="border: none; cursor: pointer; margin-right: 12px;">💬 History</button>
+                <div class="chat-history-menu" id="chatHistoryMenu">
+                    <button onclick="exportChatHistory()">📤 Export History</button>
+                    <button onclick="importChatHistory()">📥 Import History</button>
+                    <div class="divider"></div>
+                    <button onclick="clearChatHistory()" class="danger">🗑️ Clear History</button>
+                </div>
+            </div>
             <a href="/configure" class="configure-link">⚙️ Configure</a>
         </div>
         <div class="main-content">
@@ -280,18 +342,19 @@
     </div>
 
     <script>
-        // Only chat-related JS below. Sidebar/document logic removed.
-        console.log('⚖️ Starting Legal Document AI Assistant...');
+        // Enhanced chat interface with persistent history
+        console.log('⚖️ Starting Legal Document AI Assistant with persistent chat history...');
 
         // Global variables
         let isTyping = false;
         let conversationHistory = [];
+        let sessionId = null;
 
         // DOM elements
         let elements = {};
 
         document.addEventListener('DOMContentLoaded', function() {
-            console.log('📋 DOM loaded, initializing...');
+            console.log('📋 DOM loaded, initializing with persistent history...');
             initializeApp();
         });
 
@@ -309,7 +372,7 @@
                 bindEvents();
                 console.log('✅ Events bound');
                 loadInitialData();
-                console.log('✅ Loading initial data...');
+                console.log('✅ Loading initial data and chat history...');
             } catch (error) {
                 console.error('❌ Initialization failed:', error);
                 showNotification('Failed to initialize app: ' + error.message, 'error');
@@ -327,7 +390,8 @@
                 await checkSystemStatus();
                 await loadModels();
                 await loadInstructions();
-                console.log('✅ Initial data loaded');
+                await loadChatHistory();
+                console.log('✅ Initial data and chat history loaded');
             } catch (error) {
                 console.error('❌ Failed to load initial data:', error);
                 showNotification('Some features may not work properly', 'warning');
@@ -365,6 +429,90 @@
             }
         }
 
+        async function loadChatHistory() {
+            try {
+                // First try to load from server session
+                const response = await fetch('/api/chat/history');
+                const data = await response.json();
+                
+                if (data.history && data.history.length > 0) {
+                    console.log(`📚 Loaded ${data.history.length} messages from server session`);
+                    conversationHistory = data.history;
+                    renderChatHistory();
+                    return;
+                }
+                
+                // Fallback to localStorage if no server history
+                const localHistory = localStorage.getItem('chatHistory');
+                if (localHistory) {
+                    try {
+                        const parsedHistory = JSON.parse(localHistory);
+                        if (Array.isArray(parsedHistory) && parsedHistory.length > 0) {
+                            console.log(`📚 Loaded ${parsedHistory.length} messages from localStorage`);
+                            conversationHistory = parsedHistory;
+                            renderChatHistory();
+                            // Sync to server
+                            await syncHistoryToServer();
+                        }
+                    } catch (e) {
+                        console.error('❌ Failed to parse localStorage history:', e);
+                        localStorage.removeItem('chatHistory');
+                    }
+                }
+            } catch (error) {
+                console.error('❌ Failed to load chat history:', error);
+                // Try localStorage as fallback
+                try {
+                    const localHistory = localStorage.getItem('chatHistory');
+                    if (localHistory) {
+                        const parsedHistory = JSON.parse(localHistory);
+                        if (Array.isArray(parsedHistory) && parsedHistory.length > 0) {
+                            conversationHistory = parsedHistory;
+                            renderChatHistory();
+                        }
+                    }
+                } catch (e) {
+                    console.error('❌ Failed to load from localStorage:', e);
+                }
+            }
+        }
+
+        function renderChatHistory() {
+            if (conversationHistory.length === 0) {
+                elements.welcomeMessage.style.display = 'block';
+                return;
+            }
+
+            elements.welcomeMessage.style.display = 'none';
+            
+            // Clear existing messages (except welcome)
+            const existingMessages = elements.chatContainer.querySelectorAll('.message');
+            existingMessages.forEach(msg => msg.remove());
+
+            // Render all messages from history
+            conversationHistory.forEach(message => {
+                renderMessage(message.sender, message.content, message.sources, message.timestamp);
+            });
+
+            scrollToBottom();
+        }
+
+        async function syncHistoryToServer() {
+            try {
+                // Send each message to server
+                for (const message of conversationHistory) {
+                    await fetch('/api/chat/history', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(message)
+                    });
+                }
+                console.log('✅ Chat history synced to server');
+            } catch (error) {
+                console.error('❌ Failed to sync history to server:', error);
+            }
+        }
+
         function handleInputChange() {
             const hasText = elements.messageInput.value.trim().length > 0;
             elements.sendButton.disabled = !hasText || isTyping;
@@ -384,11 +532,25 @@
         async function sendMessage() {
             const message = elements.messageInput.value.trim();
             if (!message || isTyping) return;
+            
             elements.welcomeMessage.style.display = 'none';
-            addMessage('user', message);
+            
+            // Add user message to history
+            const userMessage = {
+                id: generateMessageId(),
+                sender: 'user',
+                content: message,
+                sources: [],
+                timestamp: new Date().toISOString()
+            };
+            
+            addMessageToHistory(userMessage);
+            renderMessage('user', message);
+            
             elements.messageInput.value = '';
             handleInputChange();
             showTyping();
+            
             try {
                 const response = await fetch('/query', {
                     method: 'POST',
@@ -396,24 +558,85 @@
                     body: `question=${encodeURIComponent(message)}`
                 });
                 const data = await response.json();
+                
                 if (data.error) {
-                    addMessage('assistant', `❌ ${data.error}`);
+                    const errorMessage = {
+                        id: generateMessageId(),
+                        sender: 'assistant',
+                        content: `❌ ${data.error}`,
+                        sources: [],
+                        timestamp: new Date().toISOString()
+                    };
+                    addMessageToHistory(errorMessage);
+                    renderMessage('assistant', `❌ ${data.error}`);
                 } else {
-                    addMessage('assistant', data.answer, data.sources);
+                    const assistantMessage = {
+                        id: generateMessageId(),
+                        sender: 'assistant',
+                        content: data.answer,
+                        sources: data.sources || [],
+                        timestamp: new Date().toISOString()
+                    };
+                    addMessageToHistory(assistantMessage);
+                    renderMessage('assistant', data.answer, data.sources);
                 }
             } catch (error) {
                 console.error('❌ Query failed:', error);
-                addMessage('assistant', '❌ Sorry, I encountered an error processing your question.');
+                const errorMessage = {
+                    id: generateMessageId(),
+                    sender: 'assistant',
+                    content: '❌ Sorry, I encountered an error processing your question.',
+                    sources: [],
+                    timestamp: new Date().toISOString()
+                };
+                addMessageToHistory(errorMessage);
+                renderMessage('assistant', '❌ Sorry, I encountered an error processing your question.');
             } finally {
                 hideTyping();
             }
         }
 
-        function addMessage(sender, content, sources = []) {
-            const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        function generateMessageId() {
+            return 'msg_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+        }
+
+        function addMessageToHistory(message) {
+            conversationHistory.push(message);
+            
+            // Keep only last 50 messages
+            if (conversationHistory.length > 50) {
+                conversationHistory = conversationHistory.slice(-50);
+            }
+            
+            // Save to localStorage
+            try {
+                localStorage.setItem('chatHistory', JSON.stringify(conversationHistory));
+            } catch (e) {
+                console.error('❌ Failed to save to localStorage:', e);
+            }
+            
+            // Save to server
+            saveMessageToServer(message);
+        }
+
+        async function saveMessageToServer(message) {
+            try {
+                await fetch('/api/chat/history', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(message)
+                });
+            } catch (error) {
+                console.error('❌ Failed to save message to server:', error);
+            }
+        }
+
+        function renderMessage(sender, content, sources = [], timestamp = null) {
+            const messageTime = timestamp ? new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
             const avatar = sender === 'user' ? 'You' : 'AI';
             const messageEl = document.createElement('div');
             messageEl.className = `message ${sender}`;
+            
             let sourcesHtml = '';
             if (sources && sources.length > 0) {
                 sourcesHtml = `
@@ -425,6 +648,7 @@
                     </div>
                 `;
             }
+            
             messageEl.innerHTML = `
                 <div class="message-avatar">${avatar}</div>
                 <div class="message-content">
@@ -432,9 +656,10 @@
                         <div class="message-text">${formatMessage(content)}</div>
                         ${sourcesHtml}
                     </div>
-                    <div class="message-timestamp">${timestamp}</div>
+                    <div class="message-timestamp">${messageTime}</div>
                 </div>
             `;
+            
             elements.chatContainer.appendChild(messageEl);
             scrollToBottom();
         }
@@ -479,7 +704,126 @@
             return div.innerHTML;
         }
 
-        console.log('✅ Legal Document AI Assistant initialized');
+        // Add chat history management functions
+        async function clearChatHistory() {
+            if (!confirm('Are you sure you want to clear all chat history? This cannot be undone.')) {
+                return;
+            }
+            
+            try {
+                // Clear from server
+                await fetch('/api/chat/history', { method: 'DELETE' });
+                
+                // Clear from localStorage
+                localStorage.removeItem('chatHistory');
+                
+                // Clear from memory
+                conversationHistory = [];
+                
+                // Reset UI
+                elements.welcomeMessage.style.display = 'block';
+                const existingMessages = elements.chatContainer.querySelectorAll('.message');
+                existingMessages.forEach(msg => msg.remove());
+                
+                showNotification('Chat history cleared', 'success');
+            } catch (error) {
+                console.error('❌ Failed to clear chat history:', error);
+                showNotification('Failed to clear chat history', 'error');
+            }
+        }
+
+        async function exportChatHistory() {
+            try {
+                const response = await fetch('/api/chat/history/export');
+                const data = await response.json();
+                
+                const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `chat_history_${new Date().toISOString().split('T')[0]}.json`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                
+                showNotification('Chat history exported successfully', 'success');
+            } catch (error) {
+                console.error('❌ Failed to export chat history:', error);
+                showNotification('Failed to export chat history', 'error');
+            }
+        }
+
+        // Make functions globally available
+        window.clearChatHistory = clearChatHistory;
+        window.exportChatHistory = exportChatHistory;
+
+        // Chat History Menu Functions
+        function showChatHistoryMenu() {
+            const menu = document.getElementById('chatHistoryMenu');
+            menu.classList.toggle('show');
+        }
+
+        function hideChatHistoryMenu() {
+            const menu = document.getElementById('chatHistoryMenu');
+            menu.classList.remove('show');
+        }
+
+        async function importChatHistory() {
+            // Create file input
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = '.json';
+            input.onchange = async function(e) {
+                const file = e.target.files[0];
+                if (!file) return;
+
+                try {
+                    const text = await file.text();
+                    const data = JSON.parse(text);
+                    
+                    if (!data.history || !Array.isArray(data.history)) {
+                        showNotification('Invalid chat history file format', 'error');
+                        return;
+                    }
+
+                    // Import to server
+                    const response = await fetch('/api/chat/history/import', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ history: data.history })
+                    });
+
+                    if (response.ok) {
+                        // Reload chat history
+                        await loadChatHistory();
+                        showNotification('Chat history imported successfully', 'success');
+                    } else {
+                        throw new Error('Failed to import to server');
+                    }
+                } catch (error) {
+                    console.error('❌ Failed to import chat history:', error);
+                    showNotification('Failed to import chat history', 'error');
+                }
+            };
+            input.click();
+        }
+
+        // Close menu when clicking outside
+        document.addEventListener('click', function(e) {
+            const menu = document.getElementById('chatHistoryMenu');
+            const button = e.target.closest('.chat-history-container');
+            if (!button && menu.classList.contains('show')) {
+                hideChatHistoryMenu();
+            }
+        });
+
+        // Make import function globally available
+        window.importChatHistory = importChatHistory;
+        window.showChatHistoryMenu = showChatHistoryMenu;
+        window.hideChatHistoryMenu = hideChatHistoryMenu;
+
+        console.log('✅ Legal Document AI Assistant with persistent chat history initialized');
     </script>
     <script>
         // PDF viewer fallback logic

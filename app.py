@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, render_template, send_from_directory, send_file, after_this_request
+from flask import Flask, request, jsonify, render_template, send_from_directory, send_file, after_this_request, session
 import os
 import json
 from werkzeug.utils import secure_filename
@@ -11,6 +11,8 @@ import anthropic
 import logging
 import openai
 import requests
+from datetime import datetime
+from flask_session import Session
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -19,6 +21,11 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = 'uploads'
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-production')
+app.config['SESSION_TYPE'] = 'filesystem'
+
+# Initialize Flask-Session
+Session(app)
 
 # Ensure upload directory exists
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
@@ -676,6 +683,106 @@ def api_prompt_reset():
     """Reset to default prompt"""
     default_prompt = 'You are a helpful assistant. Answer questions based on the provided document context.'
     return jsonify({'message': 'Prompt reset successfully', 'prompt': default_prompt})
+
+@app.route('/api/chat/history', methods=['GET', 'POST', 'DELETE'])
+def api_chat_history():
+    """Get, save, or clear chat history for the current session"""
+    if request.method == 'GET':
+        # Get chat history from session
+        chat_history = session.get('chat_history', [])
+        return jsonify({
+            'history': chat_history,
+            'total_messages': len(chat_history)
+        })
+    
+    elif request.method == 'POST':
+        # Save new message to chat history
+        try:
+            data = request.get_json()
+            message = {
+                'id': data.get('id'),
+                'sender': data.get('sender'),  # 'user' or 'assistant'
+                'content': data.get('content'),
+                'sources': data.get('sources', []),
+                'timestamp': data.get('timestamp', datetime.now().isoformat())
+            }
+            
+            # Initialize chat history if it doesn't exist
+            if 'chat_history' not in session:
+                session['chat_history'] = []
+            
+            # Add message to history
+            session['chat_history'].append(message)
+            
+            # Keep only last 50 messages to prevent session bloat
+            if len(session['chat_history']) > 50:
+                session['chat_history'] = session['chat_history'][-50:]
+            
+            # Mark session as modified
+            session.modified = True
+            
+            return jsonify({
+                'message': 'Message saved to history',
+                'total_messages': len(session['chat_history'])
+            })
+            
+        except Exception as e:
+            logger.error(f"Error saving chat history: {e}")
+            return jsonify({'error': str(e)}), 500
+    
+    elif request.method == 'DELETE':
+        # Clear chat history
+        session.pop('chat_history', None)
+        session.modified = True
+        return jsonify({
+            'message': 'Chat history cleared',
+            'total_messages': 0
+        })
+
+@app.route('/api/chat/history/export', methods=['GET'])
+def api_export_chat_history():
+    """Export chat history as JSON"""
+    try:
+        chat_history = session.get('chat_history', [])
+        export_data = {
+            'exported_at': datetime.now().isoformat(),
+            'total_messages': len(chat_history),
+            'history': chat_history
+        }
+        
+        return jsonify(export_data)
+        
+    except Exception as e:
+        logger.error(f"Error exporting chat history: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/chat/history/import', methods=['POST'])
+def api_import_chat_history():
+    """Import chat history from JSON"""
+    try:
+        data = request.get_json()
+        imported_history = data.get('history', [])
+        
+        if not isinstance(imported_history, list):
+            return jsonify({'error': 'Invalid history format'}), 400
+        
+        # Validate each message
+        for message in imported_history:
+            if not all(key in message for key in ['sender', 'content']):
+                return jsonify({'error': 'Invalid message format'}), 400
+        
+        # Replace current history with imported history
+        session['chat_history'] = imported_history
+        session.modified = True
+        
+        return jsonify({
+            'message': 'Chat history imported successfully',
+            'total_messages': len(imported_history)
+        })
+        
+    except Exception as e:
+        logger.error(f"Error importing chat history: {e}")
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/contract')
 def contract_viewer_page():
