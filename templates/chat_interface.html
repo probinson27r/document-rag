@@ -717,10 +717,33 @@
             
             // Save to localStorage
             try {
+                console.log('💾 Attempting to save to localStorage...');
+                console.log('💾 Data to save:', JSON.stringify(conversationHistory));
+                console.log('💾 Data length:', JSON.stringify(conversationHistory).length);
+                
                 localStorage.setItem('chatHistory', JSON.stringify(conversationHistory));
-                console.log('✅ Saved to localStorage');
+                
+                // Verify the save worked
+                const savedData = localStorage.getItem('chatHistory');
+                console.log('💾 Verification - saved data exists:', savedData !== null);
+                console.log('💾 Verification - saved data length:', savedData ? savedData.length : 0);
+                
+                if (savedData) {
+                    const parsedData = JSON.parse(savedData);
+                    console.log('💾 Verification - parsed data length:', parsedData.length);
+                    console.log('💾 Verification - data matches:', parsedData.length === conversationHistory.length);
+                }
+                
+                console.log('✅ Successfully saved to localStorage');
             } catch (e) {
                 console.error('❌ Failed to save to localStorage:', e);
+                console.error('❌ Error type:', e.name);
+                console.error('❌ Error message:', e.message);
+                
+                // Check if localStorage is available
+                console.log('🔍 localStorage available:', typeof localStorage !== 'undefined');
+                console.log('🔍 localStorage quota exceeded:', e.name === 'QuotaExceededError');
+                console.log('🔍 localStorage access denied:', e.name === 'SecurityError');
             }
             
             // Save to server
@@ -1156,6 +1179,55 @@
             location.reload();
         }
         
+        // Test localStorage functionality
+        function testLocalStorage() {
+            console.log('🧪 === TESTING LOCALSTORAGE ===');
+            
+            try {
+                // Test 1: Basic localStorage access
+                console.log('🧪 Test 1: Basic localStorage access');
+                console.log('🔍 localStorage available:', typeof localStorage !== 'undefined');
+                console.log('🔍 localStorage length:', localStorage.length);
+                
+                // Test 2: Write and read a simple value
+                console.log('🧪 Test 2: Write and read simple value');
+                localStorage.setItem('test_key', 'test_value');
+                const testValue = localStorage.getItem('test_key');
+                console.log('🔍 Test value written:', 'test_value');
+                console.log('🔍 Test value read:', testValue);
+                console.log('🔍 Test passed:', testValue === 'test_value');
+                
+                // Test 3: Write and read JSON
+                console.log('🧪 Test 3: Write and read JSON');
+                const testData = [{ id: 1, content: 'test' }];
+                localStorage.setItem('test_json', JSON.stringify(testData));
+                const testJson = localStorage.getItem('test_json');
+                const parsedJson = JSON.parse(testJson);
+                console.log('🔍 JSON written:', testData);
+                console.log('🔍 JSON read:', parsedJson);
+                console.log('🔍 JSON test passed:', JSON.stringify(testData) === JSON.stringify(parsedJson));
+                
+                // Test 4: Check current localStorage state
+                console.log('🧪 Test 4: Current localStorage state');
+                console.log('🔍 Total items:', localStorage.length);
+                console.log('🔍 All keys:', Object.keys(localStorage));
+                
+                // Clean up test data
+                localStorage.removeItem('test_key');
+                localStorage.removeItem('test_json');
+                console.log('🧪 Cleaned up test data');
+                
+                console.log('✅ All localStorage tests passed');
+                
+            } catch (error) {
+                console.error('❌ localStorage test failed:', error);
+                console.error('❌ Error type:', error.name);
+                console.error('❌ Error message:', error.message);
+            }
+            
+            console.log('🧪 === END LOCALSTORAGE TEST ===');
+        }
+        
         // Make debug functions available globally
         window.debugChatHistory = debugChatHistory;
         window.checkArrayIntegrity = checkArrayIntegrity;
@@ -1165,6 +1237,7 @@
         window.monitorConversationHistory = monitorConversationHistory;
         window.inspectLocalStorage = inspectLocalStorage;
         window.clearLocalStorage = clearLocalStorage;
+        window.testLocalStorage = testLocalStorage;
 
         console.log('✅ Legal Document AI Assistant with persistent chat history initialized');
     </script>
