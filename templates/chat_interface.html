@@ -440,26 +440,42 @@
         function loadChatHistory() {
             try {
                 console.log('📂 Loading chat history from localStorage...');
+                
+                // Check all localStorage keys
+                console.log('🔍 All localStorage keys:', Object.keys(localStorage));
+                
                 const savedHistory = localStorage.getItem('chatHistory');
+                console.log('🔍 Raw localStorage content for chatHistory:', savedHistory);
                 
                 if (savedHistory) {
                     console.log('📂 Found saved history in localStorage');
+                    console.log('🔍 Length of savedHistory string:', savedHistory.length);
+                    
                     const parsedHistory = JSON.parse(savedHistory);
                     console.log(`📂 Parsed ${parsedHistory.length} messages from localStorage`);
+                    console.log('🔍 Parsed history type:', typeof parsedHistory);
+                    console.log('🔍 Is array?', Array.isArray(parsedHistory));
                     
                     // Validate the parsed data
                     if (Array.isArray(parsedHistory)) {
                         conversationHistory = parsedHistory;
                         console.log(`✅ Loaded ${conversationHistory.length} messages into conversationHistory`);
-                        console.log(`📋 Loaded messages:`, conversationHistory.map((msg, i) => 
-                            `${i + 1}. [${msg.sender}] ${msg.content.substring(0, 30)}...`
-                        ));
+                        
+                        if (conversationHistory.length > 0) {
+                            console.log(`📋 Loaded messages:`, conversationHistory.map((msg, i) => 
+                                `${i + 1}. [${msg.sender}] ${msg.content.substring(0, 30)}...`
+                            ));
+                        } else {
+                            console.log('📋 No messages in loaded array');
+                        }
                     } else {
                         console.error('❌ Parsed history is not an array:', typeof parsedHistory);
+                        console.error('❌ Parsed history value:', parsedHistory);
                         conversationHistory = [];
                     }
                 } else {
                     console.log('📂 No saved history found in localStorage');
+                    console.log('🔍 localStorage.getItem("chatHistory") returned:', savedHistory);
                     conversationHistory = [];
                 }
                 
@@ -467,6 +483,7 @@
                 
             } catch (error) {
                 console.error('❌ Error loading chat history:', error);
+                console.error('❌ Error details:', error.message);
                 conversationHistory = [];
             }
         }
@@ -1104,6 +1121,41 @@
             console.log('🔍 === END MONITORING SETUP ===');
         }
         
+        // Function to inspect and manage localStorage
+        function inspectLocalStorage() {
+            console.log('🔍 === INSPECTING LOCALSTORAGE ===');
+            console.log('📊 Total localStorage items:', localStorage.length);
+            console.log('🔑 All localStorage keys:', Object.keys(localStorage));
+            
+            for (let i = 0; i < localStorage.length; i++) {
+                const key = localStorage.key(i);
+                const value = localStorage.getItem(key);
+                console.log(`🔑 Key: "${key}"`);
+                console.log(`📄 Value length: ${value ? value.length : 0}`);
+                console.log(`📄 Value preview: ${value ? value.substring(0, 100) + '...' : 'null'}`);
+                console.log('---');
+            }
+            
+            // Check specifically for chatHistory
+            const chatHistory = localStorage.getItem('chatHistory');
+            console.log('🔍 chatHistory specific check:');
+            console.log(`📄 Exists: ${chatHistory !== null}`);
+            console.log(`📄 Length: ${chatHistory ? chatHistory.length : 0}`);
+            console.log(`📄 Content: ${chatHistory || 'null'}`);
+            
+            console.log('🔍 === END LOCALSTORAGE INSPECTION ===');
+        }
+        
+        // Function to clear localStorage and reset
+        function clearLocalStorage() {
+            console.log('🗑️ Clearing localStorage...');
+            localStorage.clear();
+            console.log('✅ localStorage cleared');
+            conversationHistory = [];
+            console.log('✅ conversationHistory reset');
+            location.reload();
+        }
+        
         // Make debug functions available globally
         window.debugChatHistory = debugChatHistory;
         window.checkArrayIntegrity = checkArrayIntegrity;
@@ -1111,6 +1163,8 @@
         window.testRender = testRender;
         window.identifyMissingMessage = identifyMissingMessage;
         window.monitorConversationHistory = monitorConversationHistory;
+        window.inspectLocalStorage = inspectLocalStorage;
+        window.clearLocalStorage = clearLocalStorage;
 
         console.log('✅ Legal Document AI Assistant with persistent chat history initialized');
     </script>
