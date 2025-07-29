@@ -453,8 +453,12 @@
                             conversationHistory = parsedHistory;
                             renderChatHistory();
                             debugChatHistory(); // Debug the loaded history
-                            // Sync to server
-                            await syncHistoryToServer();
+                            
+                            // Only sync to server if we have more messages than the server
+                            if (parsedHistory.length > 0) {
+                                console.log('🔄 Syncing localStorage history to server...');
+                                await syncHistoryToServer();
+                            }
                         }
                     } catch (e) {
                         console.error('❌ Failed to parse localStorage history:', e);
@@ -469,6 +473,7 @@
                     if (localHistory) {
                         const parsedHistory = JSON.parse(localHistory);
                         if (Array.isArray(parsedHistory) && parsedHistory.length > 0) {
+                            console.log(`📚 Loaded ${parsedHistory.length} messages from localStorage (fallback)`);
                             conversationHistory = parsedHistory;
                             renderChatHistory();
                             debugChatHistory(); // Debug the loaded history
@@ -511,14 +516,28 @@
             try {
                 console.log(`🔄 Syncing ${conversationHistory.length} messages to server`);
                 
+                // Check if server already has the same number of messages
+                const serverResponse = await fetch('/api/chat/history');
+                const serverData = await serverResponse.json();
+                
+                if (serverData.total_messages === conversationHistory.length) {
+                    console.log('✅ Server already has the correct number of messages, skipping sync');
+                    return;
+                }
+                
+                console.log(`🔄 Server has ${serverData.total_messages} messages, we have ${conversationHistory.length}, syncing...`);
+                
                 // Clear server history first to prevent duplicates
                 await fetch('/api/chat/history', { method: 'DELETE' });
+                console.log('🗑️ Cleared server history');
                 
                 // Send each message to server with delay to prevent race conditions
-                for (const message of conversationHistory) {
-                    console.log(`🔄 Syncing message:`, {
+                for (let i = 0; i < conversationHistory.length; i++) {
+                    const message = conversationHistory[i];
+                    console.log(`🔄 Syncing message ${i + 1}/${conversationHistory.length}:`, {
                         sender: message.sender,
-                        contentLength: message.content.length
+                        contentLength: message.content.length,
+                        id: message.id
                     });
                     
                     const response = await fetch('/api/chat/history', {
@@ -528,13 +547,25 @@
                     });
                     
                     if (!response.ok) {
-                        console.error(`❌ Failed to sync message: ${response.status} ${response.statusText}`);
+                        console.error(`❌ Failed to sync message ${i + 1}: ${response.status} ${response.statusText}`);
+                    } else {
+                        const result = await response.json();
+                        console.log(`✅ Synced message ${i + 1}: server now has ${result.total_messages} messages`);
                     }
                     
                     // Small delay to prevent overwhelming the server
                     await new Promise(resolve => setTimeout(resolve, 100));
                 }
-                console.log('✅ Chat history synced to server');
+                
+                // Verify sync was successful
+                const finalResponse = await fetch('/api/chat/history');
+                const finalData = await finalResponse.json();
+                console.log(`✅ Sync complete: server now has ${finalData.total_messages} messages`);
+                
+                if (finalData.total_messages !== conversationHistory.length) {
+                    console.error(`❌ Sync verification failed: expected ${conversationHistory.length}, got ${finalData.total_messages}`);
+                }
+                
             } catch (error) {
                 console.error('❌ Failed to sync history to server:', error);
             }
@@ -899,8 +930,32 @@
             console.log('🔍 === END DEBUG ===');
         }
         
-        // Make debug function available globally
+        // Function to check conversationHistory array integrity
+        function checkArrayIntegrity() {
+            console.log('🔍 === ARRAY INTEGRITY CHECK ===');
+            console.log(`Array length: ${conversationHistory.length}`);
+            console.log(`Array type: ${Array.isArray(conversationHistory)}`);
+            
+            if (conversationHistory.length > 0) {
+                console.log('Array contents:');
+                conversationHistory.forEach((msg, index) => {
+                    console.log(`  [${index}]: ${msg.sender} - "${msg.content.substring(0, 30)}..." (${msg.id})`);
+                });
+            }
+            
+            // Check for duplicates
+            const ids = conversationHistory.map(msg => msg.id);
+            const uniqueIds = new Set(ids);
+            if (ids.length !== uniqueIds.size) {
+                console.warn('⚠️ Duplicate message IDs detected!');
+            }
+            
+            console.log('🔍 === END INTEGRITY CHECK ===');
+        }
+        
+        // Make debug functions available globally
         window.debugChatHistory = debugChatHistory;
+        window.checkArrayIntegrity = checkArrayIntegrity;
 
         console.log('✅ Legal Document AI Assistant with persistent chat history initialized');
     </script>
