@@ -1228,6 +1228,79 @@
             console.log('🧪 === END LOCALSTORAGE TEST ===');
         }
         
+        // Function to inspect the chatHistory key specifically
+        function inspectChatHistory() {
+            console.log('🔍 === INSPECTING CHATHISTORY KEY ===');
+            
+            const chatHistory = localStorage.getItem('chatHistory');
+            console.log('🔍 chatHistory key exists:', chatHistory !== null);
+            console.log('🔍 chatHistory content length:', chatHistory ? chatHistory.length : 0);
+            console.log('🔍 chatHistory raw content:', chatHistory);
+            
+            if (chatHistory) {
+                try {
+                    const parsed = JSON.parse(chatHistory);
+                    console.log('🔍 Parsed successfully:', true);
+                    console.log('🔍 Parsed type:', typeof parsed);
+                    console.log('🔍 Is array:', Array.isArray(parsed));
+                    console.log('🔍 Array length:', Array.isArray(parsed) ? parsed.length : 'N/A');
+                    
+                    if (Array.isArray(parsed) && parsed.length > 0) {
+                        console.log('🔍 First message:', parsed[0]);
+                        console.log('🔍 All messages:');
+                        parsed.forEach((msg, index) => {
+                            console.log(`  ${index + 1}. [${msg.sender}] ${msg.content.substring(0, 50)}...`);
+                        });
+                    } else if (Array.isArray(parsed)) {
+                        console.log('🔍 Array is empty');
+                    } else {
+                        console.log('🔍 Not an array:', parsed);
+                    }
+                } catch (e) {
+                    console.error('❌ Failed to parse chatHistory:', e);
+                }
+            }
+            
+            console.log('🔍 === END CHATHISTORY INSPECTION ===');
+        }
+        
+        // Function to force load and render chat history
+        function forceLoadAndRender() {
+            console.log('🔄 === FORCE LOADING AND RENDERING ===');
+            
+            // Load from localStorage
+            const savedHistory = localStorage.getItem('chatHistory');
+            console.log('🔄 Raw saved history:', savedHistory);
+            
+            if (savedHistory) {
+                try {
+                    const parsedHistory = JSON.parse(savedHistory);
+                    console.log('🔄 Parsed history:', parsedHistory);
+                    
+                    if (Array.isArray(parsedHistory)) {
+                        console.log(`🔄 Setting conversationHistory to ${parsedHistory.length} messages`);
+                        conversationHistory = parsedHistory;
+                        
+                        console.log('🔄 Current conversationHistory:', conversationHistory);
+                        
+                        // Force render
+                        console.log('🔄 Calling renderChatHistory...');
+                        renderChatHistory();
+                        
+                        console.log('🔄 Render complete');
+                    } else {
+                        console.error('❌ Parsed history is not an array');
+                    }
+                } catch (e) {
+                    console.error('❌ Failed to parse history:', e);
+                }
+            } else {
+                console.log('🔄 No saved history found');
+            }
+            
+            console.log('🔄 === END FORCE LOAD AND RENDER ===');
+        }
+        
         // Make debug functions available globally
         window.debugChatHistory = debugChatHistory;
         window.checkArrayIntegrity = checkArrayIntegrity;
@@ -1238,6 +1311,8 @@
         window.inspectLocalStorage = inspectLocalStorage;
         window.clearLocalStorage = clearLocalStorage;
         window.testLocalStorage = testLocalStorage;
+        window.inspectChatHistory = inspectChatHistory;
+        window.forceLoadAndRender = forceLoadAndRender;
 
         console.log('✅ Legal Document AI Assistant with persistent chat history initialized');
     </script>
