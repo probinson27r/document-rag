@@ -4,316 +4,238 @@
 
 This guide provides step-by-step instructions for deploying the Legal Document RAG System to AWS using Docker containers. The deployment uses AWS ECR (Elastic Container Registry) and ECS (Elastic Container Service) for simplicity.
 
-## Prerequisites
+## 🚀 **Quick Start**
 
-### Required Tools
-- [Docker](https://docs.docker.com/get-docker/) installed and running
-- [AWS CLI](https://aws.amazon.com/cli/) installed and configured
+### **Prerequisites**
+- AWS CLI installed and configured
+- Docker installed
+- Python 3.8+ installed
 - AWS account with appropriate permissions
 
-### AWS Permissions
-Your AWS user/role needs the following permissions:
-- ECR: Full access
-- ECS: Full access
-- IAM: Create roles and policies
-- CloudWatch Logs: Create log groups
-- Secrets Manager: Create and manage secrets (optional)
-
-## Quick Start
-
-### 1. Configure AWS CLI
+### **Step 1: Set Up Environment**
 ```bash
-aws configure
-# Enter your AWS Access Key ID, Secret Access Key, and preferred region
+# Run the interactive setup script
+./setup-env.sh
 ```
 
-### 2. Run the Deployment Script
+### **Step 2: Deploy to AWS**
 ```bash
+# Deploy with configured environment
+./deploy-with-env.sh
+```
+
+### **Step 3: Access Your Application**
+After deployment, you'll get a URL like:
+```
+http://legal-rag-alb-123456789.ap-southeast-2.elb.amazonaws.com
+```
+
+## 🔧 **Manual Deployment Steps**
+
+If you prefer to deploy manually or need to customize the deployment:
+
+### **1. Build and Push Docker Image**
+```bash
+# Build the Docker image
+docker build -t legal-document-rag .
+
+# Tag for ECR
+docker tag legal-document-rag:latest $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/legal-document-rag:latest
+
+# Push to ECR
+docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/legal-document-rag:latest
+```
+
+### **2. Create AWS Secrets**
+```bash
+# Create secrets in AWS Secrets Manager
+aws secretsmanager create-secret \
+    --name "legal-rag/secret-key" \
+    --secret-string "your-secret-key" \
+    --region ap-southeast-2
+
+aws secretsmanager create-secret \
+    --name "legal-rag/anthropic-api-key" \
+    --secret-string "your-claude-api-key" \
+    --region ap-southeast-2
+
+aws secretsmanager create-secret \
+    --name "legal-rag/openai-api-key" \
+    --secret-string "your-openai-api-key" \
+    --region ap-southeast-2
+
+aws secretsmanager create-secret \
+    --name "legal-rag/private-gpt4-api-key" \
+    --secret-string "your-private-gpt4-api-key" \
+    --region ap-southeast-2
+```
+
+### **3. Deploy Infrastructure**
+```bash
+# Run the deployment script
 ./deploy-aws.sh
 ```
 
-This script will:
-- Build the Docker image
-- Push it to ECR
-- Create ECS cluster and task definition
-- Set up CloudWatch logging
+## 🌐 **Application Load Balancer (ALB)**
 
-## Manual Deployment Steps
+The deployment automatically creates a complete ALB setup:
 
-### Step 1: Build and Push Docker Image
+### **ALB Components Created**
+- **Application Load Balancer**: `legal-rag-alb`
+- **Target Group**: `legal-rag-tg` (port 5001)
+- **Listener**: HTTP on port 80
+- **Security Groups**: 
+  - `legal-rag-alb-sg` (ALB security group)
+  - `legal-rag-ecs-sg` (ECS tasks security group)
 
-```bash
-# Build the image
-docker build -t legal-document-rag:latest .
+### **ALB Configuration**
+- **Protocol**: HTTP (port 80)
+- **Health Check**: `/api/status` endpoint
+- **Health Check Interval**: 30 seconds
+- **Health Check Timeout**: 5 seconds
+- **Healthy Threshold**: 2 consecutive checks
+- **Unhealthy Threshold**: 2 consecutive checks
 
-# Login to ECR
-aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com
+### **Security Groups**
+- **ALB Security Group**: Allows HTTP (80) and HTTPS (443) from anywhere
+- **ECS Security Group**: Allows traffic on port 5001 only from ALB
 
-# Tag and push
-docker tag legal-document-rag:latest $AWS_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/legal-document-rag:latest
-docker push $AWS_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/legal-document-rag:latest
+### **Accessing Your Application**
+After deployment, you can access your application at:
+```
+http://[ALB-DNS-NAME]
 ```
 
-### Step 2: Create ECS Cluster
-
-```bash
-aws ecs create-cluster --cluster-name legal-rag-cluster --region us-east-1
+Example:
+```
+http://legal-rag-alb-123456789.ap-southeast-2.elb.amazonaws.com
 ```
 
-### Step 3: Create Task Definition
-
-The deployment script creates a task definition automatically. You can also create it manually:
-
-```bash
-aws ecs register-task-definition --cli-input-json file://task-definition.json
+### **Health Check Endpoint**
+The ALB health check uses:
+```
+http://[ALB-DNS-NAME]/api/status
 ```
 
-### Step 4: Create ECS Service
+## 🔍 **Monitoring and Verification**
 
+### **Check Deployment Status**
 ```bash
-aws ecs create-service \
-  --cluster legal-rag-cluster \
-  --service-name legal-rag-service \
-  --task-definition legal-rag-task:1 \
-  --desired-count 1 \
-  --launch-type FARGATE \
-  --network-configuration "awsvpcConfiguration={subnets=[subnet-12345],securityGroups=[sg-12345],assignPublicIp=ENABLED}"
+# Check all AWS resources
+./check-aws-resources.sh
 ```
 
-## Environment Configuration
-
-### Environment Variables
-
-The application uses the following environment variables:
-
-| Variable | Description | Required |
-|----------|-------------|----------|
-| `FLASK_ENV` | Flask environment (production/development) | Yes |
-| `SECRET_KEY` | Flask secret key for sessions | Yes |
-| `ANTHROPIC_API_KEY` | Claude API key | No |
-| `OPENAI_API_KEY` | OpenAI API key | No |
-| `PRIVATE_GPT4_API_KEY` | Private GPT-4 API key | No |
-
-### AWS Secrets Manager (Recommended)
-
-For production, store API keys in AWS Secrets Manager:
-
+### **View Application Logs**
 ```bash
-# Create secrets
-aws secretsmanager create-secret \
-  --name legal-rag/anthropic-api-key \
-  --secret-string "your-claude-api-key"
+# Get ECS service logs
+aws logs describe-log-groups --log-group-name-prefix "/ecs/legal-rag-task" --region ap-southeast-2
 
-aws secretsmanager create-secret \
-  --name legal-rag/openai-api-key \
-  --secret-string "your-openai-api-key"
-
-aws secretsmanager create-secret \
-  --name legal-rag/private-gpt4-api-key \
-  --secret-string "your-private-gpt4-api-key"
+# Get recent log events
+aws logs filter-log-events \
+    --log-group-name "/ecs/legal-rag-task" \
+    --start-time $(date -d '1 hour ago' +%s)000 \
+    --region ap-southeast-2
 ```
 
-## Local Testing
-
-### Using Docker Compose
-
+### **Test Application Health**
 ```bash
-# Build and run locally
-docker-compose up --build
+# Get ALB DNS name
+ALB_DNS=$(aws elbv2 describe-load-balancers --names legal-rag-alb --region ap-southeast-2 --query 'LoadBalancers[0].DNSName' --output text)
 
-# Access the application
-open http://localhost:5001
+# Test health endpoint
+curl -f http://$ALB_DNS/api/status
+
+# Test main application
+curl -f http://$ALB_DNS/
 ```
 
-### Using Docker
+## 🔧 **Troubleshooting**
 
-```bash
-# Build image
-docker build -t legal-document-rag .
+### **Common Issues**
 
-# Run container
-docker run -p 5001:5001 \
-  -e FLASK_ENV=development \
-  -e SECRET_KEY=dev-secret-key \
-  legal-document-rag
-```
-
-## Monitoring and Logs
-
-### CloudWatch Logs
-Logs are automatically sent to CloudWatch:
-- Log Group: `/ecs/legal-rag-task`
-- Stream Prefix: `ecs`
-
-### Health Checks
-The application includes health checks:
-- Endpoint: `GET /api/status`
-- Interval: 30 seconds
-- Timeout: 5 seconds
-- Retries: 3
-
-## Scaling
-
-### Manual Scaling
-```bash
-# Scale the service
-aws ecs update-service \
-  --cluster legal-rag-cluster \
-  --service legal-rag-service \
-  --desired-count 2
-```
-
-### Auto Scaling
-For production, consider setting up auto scaling based on CPU/memory usage.
-
-## Security Considerations
-
-### Network Security
-- Use private subnets for ECS tasks
-- Configure security groups to allow only necessary traffic
-- Use Application Load Balancer for public access
-
-### Data Security
-- Store API keys in AWS Secrets Manager
-- Use HTTPS for all external communication
-- Implement proper IAM roles and policies
-
-### Container Security
-- Run containers as non-root user
-- Regularly update base images
-- Scan images for vulnerabilities
-
-## Troubleshooting
-
-### Common Issues
-
-1. **Container fails to start**
-   ```bash
-   # Check ECS task logs
-   aws logs describe-log-streams --log-group-name "/ecs/legal-rag-task"
-   aws logs get-log-events --log-group-name "/ecs/legal-rag-task" --log-stream-name "stream-name"
-   ```
-
-2. **Image pull fails**
-   ```bash
-   # Verify ECR repository exists
-   aws ecr describe-repositories --repository-names legal-document-rag
-   ```
-
-3. **Health check fails**
-   ```bash
-   # Check if application is responding
-   curl http://localhost:5001/api/status
-   ```
-
-### Debug Commands
-
+#### **1. ALB Health Check Failing**
 ```bash
 # Check ECS service status
-aws ecs describe-services --cluster legal-rag-cluster --services legal-rag-service
+aws ecs describe-services --cluster legal-rag-cluster --services legal-rag-service --region ap-southeast-2
 
+# Check target group health
+aws elbv2 describe-target-health --target-group-arn [TARGET-GROUP-ARN] --region ap-southeast-2
+```
+
+#### **2. ECS Tasks Not Starting**
+```bash
 # Check task definition
-aws ecs describe-task-definition --task-definition legal-rag-task
+aws ecs describe-task-definition --task-definition legal-rag-task --region ap-southeast-2
 
-# List running tasks
-aws ecs list-tasks --cluster legal-rag-cluster
+# Check ECS events
+aws ecs describe-services --cluster legal-rag-cluster --services legal-rag-service --region ap-southeast-2 --query 'services[0].events'
 ```
 
-## Cost Optimization
-
-### Resource Allocation
-- Start with minimal resources (1 vCPU, 2GB RAM)
-- Monitor usage and adjust as needed
-- Use Spot instances for non-critical workloads
-
-### Storage
-- Use EFS for persistent storage if needed
-- Consider S3 for document storage
-- Clean up unused ECR images
-
-## Production Considerations
-
-### High Availability
-- Deploy across multiple Availability Zones
-- Use Application Load Balancer
-- Implement proper monitoring and alerting
-
-### Backup and Recovery
-- Backup ChromaDB data regularly
-- Document recovery procedures
-- Test disaster recovery scenarios
-
-### Performance
-- Monitor application performance
-- Optimize container resources
-- Consider caching strategies
-
-## Cleanup
-
-To remove all resources:
-
+#### **3. Security Group Issues**
 ```bash
-# Check what resources exist first
+# Check security group rules
+aws ec2 describe-security-groups --filters "Name=group-name,Values=legal-rag-*" --region ap-southeast-2
+```
+
+#### **4. Secrets Not Loading**
+```bash
+# Check if secrets exist
+aws secretsmanager list-secrets --region ap-southeast-2 --query 'SecretList[?contains(Name, `legal-rag`)]'
+
+# Test secret access
+aws secretsmanager get-secret-value --secret-id legal-rag/secret-key --region ap-southeast-2
+```
+
+### **Debug Commands**
+```bash
+# Check all resources in one command
 ./check-aws-resources.sh
 
-# Destroy all resources
+# Get detailed ECS service information
+aws ecs describe-services --cluster legal-rag-cluster --services legal-rag-service --region ap-southeast-2
+
+# Check ALB target health
+aws elbv2 describe-target-health --target-group-arn $(aws elbv2 describe-target-groups --names legal-rag-tg --region ap-southeast-2 --query 'TargetGroups[0].TargetGroupArn' --output text) --region ap-southeast-2
+```
+
+## 🗑️ **Cleanup**
+
+### **Destroy All Resources**
+```bash
+# Remove all AWS resources
 ./destroy-aws.sh
 ```
 
-### Manual Cleanup Commands
-
-If you prefer to clean up manually:
-
-```bash
-# Delete ECS service
-aws ecs update-service --cluster legal-rag-cluster --service legal-rag-service --desired-count 0
-aws ecs delete-service --cluster legal-rag-cluster --service legal-rag-service
-
-# Delete ECS cluster
-aws ecs delete-cluster --cluster legal-rag-cluster
-
-# Delete ECR repository
-aws ecr delete-repository --repository-name legal-document-rag --force
-
-# Delete CloudWatch log group
-aws logs delete-log-group --log-group-name "/ecs/legal-rag-task"
-
-# Delete secrets (if created)
-aws secretsmanager delete-secret --secret-id legal-rag/anthropic-api-key
-aws secretsmanager delete-secret --secret-id legal-rag/openai-api-key
-aws secretsmanager delete-secret --secret-id legal-rag/private-gpt4-api-key
-```
-
-## Resource Management Scripts
-
-### Check Resources
-```bash
-./check-aws-resources.sh
-```
-This script shows you what AWS resources currently exist for the Legal Document RAG system.
-
-### Destroy Resources
-```bash
-./destroy-aws.sh
-```
-This script safely removes all AWS resources created by the deployment, including:
-- ECS service and cluster
-- Task definitions
+This will remove:
+- ECS cluster and service
+- Application Load Balancer and target group
+- Security groups
 - ECR repository and images
 - CloudWatch log groups
 - AWS Secrets Manager secrets
-- Local deployment files
 
-### Safety Features
-- **Graceful shutdown**: Scales down services before deletion
-- **Resource verification**: Checks if resources exist before attempting deletion
-- **Error handling**: Continues even if some resources don't exist
-- **Verification**: Confirms cleanup was successful
+### **Verify Cleanup**
+```bash
+# Check that all resources are removed
+./check-aws-resources.sh
+```
 
-## Support
+## 🔒 **Security Considerations**
 
-For issues or questions:
-1. Check the troubleshooting section
-2. Review CloudWatch logs
-3. Verify AWS service status
-4. Check application logs in the container 
+### **Production Security**
+- **HTTPS**: Add SSL certificate for HTTPS
+- **WAF**: Consider AWS WAF for additional protection
+- **VPC**: Use private subnets for ECS tasks
+- **IAM**: Use least privilege IAM roles
+- **Secrets**: Rotate secrets regularly
+
+### **Network Security**
+- **ALB Security Group**: Only allows HTTP/HTTPS
+- **ECS Security Group**: Only allows traffic from ALB
+- **No Direct Access**: ECS tasks are not directly accessible
+
+### **Application Security**
+- **SECRET_KEY**: Stored securely in AWS Secrets Manager
+- **API Keys**: Stored securely in AWS Secrets Manager
+- **Health Checks**: Regular health monitoring
+- **Logging**: Centralized logging in CloudWatch 

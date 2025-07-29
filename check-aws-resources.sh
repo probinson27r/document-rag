@@ -6,7 +6,7 @@
 set -e
 
 # Configuration (must match deploy-aws.sh)
-AWS_REGION="us-east-1"  # Change to your preferred region
+AWS_REGION="ap-southeast-2"  # Change to your preferred region
 AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 ECR_REPOSITORY_NAME="legal-document-rag"
 CLUSTER_NAME="legal-rag-cluster"
@@ -128,6 +128,38 @@ SECRETS=(
 for secret in "${SECRETS[@]}"; do
     check_resource "Secret" "$secret" \
         "aws secretsmanager describe-secret --secret-id $secret --region $AWS_REGION"
+done
+
+# Check Application Load Balancer resources
+echo "=== Load Balancer Resources ==="
+
+# Check ALB
+ALB_NAME="legal-rag-alb"
+check_resource "Application Load Balancer" "$ALB_NAME" \
+    "aws elbv2 describe-load-balancers --names $ALB_NAME --region $AWS_REGION"
+
+# Check target group
+TG_NAME="legal-rag-tg"
+check_resource "Target Group" "$TG_NAME" \
+    "aws elbv2 describe-target-groups --names $TG_NAME --region $AWS_REGION"
+
+# Check ALB listeners
+ALB_ARN=$(aws elbv2 describe-load-balancers --names $ALB_NAME --region $AWS_REGION --query 'LoadBalancers[0].LoadBalancerArn' --output text 2>/dev/null || echo "None")
+if [ "$ALB_ARN" != "None" ] && [ -n "$ALB_ARN" ]; then
+    check_resource "ALB Listeners" "Listeners for $ALB_NAME" \
+        "aws elbv2 describe-listeners --load-balancer-arn $ALB_ARN --region $AWS_REGION"
+fi
+
+# Check security groups
+echo "=== Security Group Resources ==="
+SECURITY_GROUPS=(
+    "legal-rag-alb-sg"
+    "legal-rag-ecs-sg"
+)
+
+for sg_name in "${SECURITY_GROUPS[@]}"; do
+    check_resource "Security Group" "$sg_name" \
+        "aws ec2 describe-security-groups --filters \"Name=group-name,Values=$sg_name\" --region $AWS_REGION"
 done
 
 echo ""
