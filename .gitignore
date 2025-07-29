@@ -292,4 +292,4 @@ config.ini
 
 # Development files
 examples/simple_chat.html
-examples/test.html 
+examples/test.html flask_session/
