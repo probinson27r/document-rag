@@ -431,12 +431,15 @@
 
         async function loadChatHistory() {
             try {
+                console.log(`🔄 Loading chat history. Current array length: ${conversationHistory.length}`);
+                
                 // First try to load from server session
                 const response = await fetch('/api/chat/history');
                 const data = await response.json();
                 
                 if (data.history && data.history.length > 0) {
                     console.log(`📚 Loaded ${data.history.length} messages from server session`);
+                    console.log(`🔄 Reassigning conversationHistory from ${conversationHistory.length} to ${data.history.length} messages`);
                     conversationHistory = data.history;
                     renderChatHistory();
                     debugChatHistory(); // Debug the loaded history
@@ -450,6 +453,7 @@
                         const parsedHistory = JSON.parse(localHistory);
                         if (Array.isArray(parsedHistory) && parsedHistory.length > 0) {
                             console.log(`📚 Loaded ${parsedHistory.length} messages from localStorage`);
+                            console.log(`🔄 Reassigning conversationHistory from ${conversationHistory.length} to ${parsedHistory.length} messages`);
                             conversationHistory = parsedHistory;
                             renderChatHistory();
                             debugChatHistory(); // Debug the loaded history
@@ -474,6 +478,7 @@
                         const parsedHistory = JSON.parse(localHistory);
                         if (Array.isArray(parsedHistory) && parsedHistory.length > 0) {
                             console.log(`📚 Loaded ${parsedHistory.length} messages from localStorage (fallback)`);
+                            console.log(`🔄 Reassigning conversationHistory from ${conversationHistory.length} to ${parsedHistory.length} messages`);
                             conversationHistory = parsedHistory;
                             renderChatHistory();
                             debugChatHistory(); // Debug the loaded history
@@ -662,14 +667,21 @@
             console.log(`💾 Adding message to history:`, {
                 sender: message.sender,
                 contentLength: message.content.length,
-                timestamp: message.timestamp
+                timestamp: message.timestamp,
+                id: message.id
             });
+            
+            console.log(`📊 Array before adding: ${conversationHistory.length} messages`);
             
             conversationHistory.push(message);
             
+            console.log(`📊 Array after adding: ${conversationHistory.length} messages`);
+            
             // Keep only last 50 messages
             if (conversationHistory.length > 50) {
+                console.log(`🗑️ Trimming array from ${conversationHistory.length} to 50 messages`);
                 conversationHistory = conversationHistory.slice(-50);
+                console.log(`📊 Array after trimming: ${conversationHistory.length} messages`);
             }
             
             console.log(`📚 Conversation history now contains ${conversationHistory.length} messages`);
@@ -953,9 +965,31 @@
             console.log('🔍 === END INTEGRITY CHECK ===');
         }
         
+        // Function to check localStorage contents
+        function checkLocalStorage() {
+            console.log('🔍 === LOCALSTORAGE CHECK ===');
+            try {
+                const localHistory = localStorage.getItem('chatHistory');
+                if (localHistory) {
+                    const parsedHistory = JSON.parse(localHistory);
+                    console.log(`📦 localStorage contains ${parsedHistory.length} messages`);
+                    
+                    parsedHistory.forEach((msg, index) => {
+                        console.log(`  [${index}]: ${msg.sender} - "${msg.content.substring(0, 30)}..." (${msg.id})`);
+                    });
+                } else {
+                    console.log('📦 localStorage is empty');
+                }
+            } catch (e) {
+                console.error('❌ Error reading localStorage:', e);
+            }
+            console.log('🔍 === END LOCALSTORAGE CHECK ===');
+        }
+        
         // Make debug functions available globally
         window.debugChatHistory = debugChatHistory;
         window.checkArrayIntegrity = checkArrayIntegrity;
+        window.checkLocalStorage = checkLocalStorage;
 
         console.log('✅ Legal Document AI Assistant with persistent chat history initialized');
     </script>
