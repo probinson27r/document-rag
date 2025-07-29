@@ -723,6 +723,7 @@ def api_chat_history():
     if request.method == 'GET':
         # Get chat history from session
         chat_history = session.get('chat_history', [])
+        logger.info(f"Retrieved {len(chat_history)} messages from session")
         return jsonify({
             'history': chat_history,
             'total_messages': len(chat_history)
@@ -732,6 +733,12 @@ def api_chat_history():
         # Save new message to chat history
         try:
             data = request.get_json()
+            
+            # Validate required fields
+            if not data.get('sender') or not data.get('content'):
+                logger.error(f"Invalid message format: {data}")
+                return jsonify({'error': 'Missing required fields: sender and content'}), 400
+            
             message = {
                 'id': data.get('id'),
                 'sender': data.get('sender'),  # 'user' or 'assistant'
@@ -739,6 +746,9 @@ def api_chat_history():
                 'sources': data.get('sources', []),
                 'timestamp': data.get('timestamp', datetime.now().isoformat())
             }
+            
+            # Log the message being saved
+            logger.info(f"Saving message: sender={message['sender']}, content_length={len(message['content'])}")
             
             # Initialize chat history if it doesn't exist
             if 'chat_history' not in session:
@@ -754,6 +764,8 @@ def api_chat_history():
             # Mark session as modified
             session.modified = True
             
+            logger.info(f"Chat history now contains {len(session['chat_history'])} messages")
+            
             return jsonify({
                 'message': 'Message saved to history',
                 'total_messages': len(session['chat_history'])
@@ -767,6 +779,7 @@ def api_chat_history():
         # Clear chat history
         session.pop('chat_history', None)
         session.modified = True
+        logger.info("Chat history cleared")
         return jsonify({
             'message': 'Chat history cleared',
             'total_messages': 0

@@ -478,6 +478,8 @@
         }
 
         function renderChatHistory() {
+            console.log(`🎨 Rendering chat history with ${conversationHistory.length} messages`);
+            
             if (conversationHistory.length === 0) {
                 elements.welcomeMessage.style.display = 'block';
                 return;
@@ -490,7 +492,12 @@
             existingMessages.forEach(msg => msg.remove());
 
             // Render all messages from history
-            conversationHistory.forEach(message => {
+            conversationHistory.forEach((message, index) => {
+                console.log(`🎨 Rendering message ${index + 1}:`, {
+                    sender: message.sender,
+                    contentLength: message.content.length,
+                    timestamp: message.timestamp
+                });
                 renderMessage(message.sender, message.content, message.sources, message.timestamp);
             });
 
@@ -601,6 +608,12 @@
         }
 
         function addMessageToHistory(message) {
+            console.log(`💾 Adding message to history:`, {
+                sender: message.sender,
+                contentLength: message.content.length,
+                timestamp: message.timestamp
+            });
+            
             conversationHistory.push(message);
             
             // Keep only last 50 messages
@@ -608,9 +621,12 @@
                 conversationHistory = conversationHistory.slice(-50);
             }
             
+            console.log(`📚 Conversation history now contains ${conversationHistory.length} messages`);
+            
             // Save to localStorage
             try {
                 localStorage.setItem('chatHistory', JSON.stringify(conversationHistory));
+                console.log('✅ Saved to localStorage');
             } catch (e) {
                 console.error('❌ Failed to save to localStorage:', e);
             }
@@ -621,11 +637,23 @@
 
         async function saveMessageToServer(message) {
             try {
-                await fetch('/api/chat/history', {
+                console.log(`🌐 Saving message to server:`, {
+                    sender: message.sender,
+                    contentLength: message.content.length
+                });
+                
+                const response = await fetch('/api/chat/history', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(message)
                 });
+                
+                if (response.ok) {
+                    const result = await response.json();
+                    console.log(`✅ Message saved to server: ${result.total_messages} total messages`);
+                } else {
+                    console.error(`❌ Server error: ${response.status} ${response.statusText}`);
+                }
             } catch (error) {
                 console.error('❌ Failed to save message to server:', error);
             }
