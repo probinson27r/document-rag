@@ -119,6 +119,7 @@ echo ""
 # Check AWS Secrets Manager secrets
 echo "=== Secrets Manager Resources ==="
 SECRETS=(
+    "legal-rag/secret-key"
     "legal-rag/anthropic-api-key"
     "legal-rag/openai-api-key"
     "legal-rag/private-gpt4-api-key"

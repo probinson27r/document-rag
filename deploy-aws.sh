@@ -73,24 +73,24 @@ cat > task-definition.json << EOF
                 {
                     "name": "FLASK_ENV",
                     "value": "production"
-                },
-                {
-                    "name": "SECRET_KEY",
-                    "value": "your-production-secret-key-change-this"
                 }
             ],
             "secrets": [
                 {
+                    "name": "SECRET_KEY",
+                    "valueFrom": "arn:aws:secretsmanager:ap-southeast-2:$AWS_ACCOUNT_ID:secret:legal-rag/secret-key"
+                },
+                {
                     "name": "ANTHROPIC_API_KEY",
-                    "valueFrom": "arn:aws:secretsmanager:us-east-1:$AWS_ACCOUNT_ID:secret:legal-rag/anthropic-api-key"
+                    "valueFrom": "arn:aws:secretsmanager:ap-southeast-2:$AWS_ACCOUNT_ID:secret:legal-rag/anthropic-api-key"
                 },
                 {
                     "name": "OPENAI_API_KEY",
-                    "valueFrom": "arn:aws:secretsmanager:us-east-1:$AWS_ACCOUNT_ID:secret:legal-rag/openai-api-key"
+                    "valueFrom": "arn:aws:secretsmanager:ap-southeast-2:$AWS_ACCOUNT_ID:secret:legal-rag/openai-api-key"
                 },
                 {
                     "name": "PRIVATE_GPT4_API_KEY",
-                    "valueFrom": "arn:aws:secretsmanager:us-east-1:$AWS_ACCOUNT_ID:secret:legal-rag/private-gpt4-api-key"
+                    "valueFrom": "arn:aws:secretsmanager:ap-southeast-2:$AWS_ACCOUNT_ID:secret:legal-rag/private-gpt4-api-key"
                 }
             ],
             "logConfiguration": {

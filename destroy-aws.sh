@@ -6,7 +6,7 @@
 set -e
 
 # Configuration (must match deploy-aws.sh)
-AWS_REGION="us-east-1"  # Change to your preferred region
+AWS_REGION="ap-southeast-2"  # Change to your preferred region
 AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 ECR_REPOSITORY_NAME="legal-document-rag"
 CLUSTER_NAME="legal-rag-cluster"
@@ -113,6 +113,7 @@ safe_delete "ECR repository" "$ECR_REPOSITORY_NAME" \
 # Step 7: Delete AWS Secrets Manager secrets (if they exist)
 echo "🗑️ Deleting AWS Secrets Manager secrets..."
 SECRETS=(
+    "legal-rag/secret-key"
     "legal-rag/anthropic-api-key"
     "legal-rag/openai-api-key"
     "legal-rag/private-gpt4-api-key"
