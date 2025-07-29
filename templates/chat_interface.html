@@ -437,64 +437,37 @@
             }
         }
 
-        async function loadChatHistory() {
+        function loadChatHistory() {
             try {
-                console.log(`🔄 Loading chat history. Current array length: ${conversationHistory.length}`);
+                console.log('📂 Loading chat history from localStorage...');
+                const savedHistory = localStorage.getItem('chatHistory');
                 
-                // First try to load from server session
-                const response = await fetch('/api/chat/history');
-                const data = await response.json();
-                
-                if (data.history && data.history.length > 0) {
-                    console.log(`📚 Loaded ${data.history.length} messages from server session`);
-                    console.log(`🔄 Reassigning conversationHistory from ${conversationHistory.length} to ${data.history.length} messages`);
-                    conversationHistory = data.history;
-                    renderChatHistory();
-                    debugChatHistory(); // Debug the loaded history
-                    return;
-                }
-                
-                // Fallback to localStorage if no server history
-                const localHistory = localStorage.getItem('chatHistory');
-                if (localHistory) {
-                    try {
-                        const parsedHistory = JSON.parse(localHistory);
-                        if (Array.isArray(parsedHistory) && parsedHistory.length > 0) {
-                            console.log(`📚 Loaded ${parsedHistory.length} messages from localStorage`);
-                            console.log(`🔄 Reassigning conversationHistory from ${conversationHistory.length} to ${parsedHistory.length} messages`);
-                            conversationHistory = parsedHistory;
-                            renderChatHistory();
-                            debugChatHistory(); // Debug the loaded history
-                            
-                            // Only sync to server if we have more messages than the server
-                            if (parsedHistory.length > 0) {
-                                console.log('🔄 Syncing localStorage history to server...');
-                                await syncHistoryToServer();
-                            }
-                        }
-                    } catch (e) {
-                        console.error('❌ Failed to parse localStorage history:', e);
-                        localStorage.removeItem('chatHistory');
+                if (savedHistory) {
+                    console.log('📂 Found saved history in localStorage');
+                    const parsedHistory = JSON.parse(savedHistory);
+                    console.log(`📂 Parsed ${parsedHistory.length} messages from localStorage`);
+                    
+                    // Validate the parsed data
+                    if (Array.isArray(parsedHistory)) {
+                        conversationHistory = parsedHistory;
+                        console.log(`✅ Loaded ${conversationHistory.length} messages into conversationHistory`);
+                        console.log(`📋 Loaded messages:`, conversationHistory.map((msg, i) => 
+                            `${i + 1}. [${msg.sender}] ${msg.content.substring(0, 30)}...`
+                        ));
+                    } else {
+                        console.error('❌ Parsed history is not an array:', typeof parsedHistory);
+                        conversationHistory = [];
                     }
+                } else {
+                    console.log('📂 No saved history found in localStorage');
+                    conversationHistory = [];
                 }
+                
+                console.log(`📊 Final conversationHistory length: ${conversationHistory.length}`);
+                
             } catch (error) {
-                console.error('❌ Failed to load chat history:', error);
-                // Try localStorage as fallback
-                try {
-                    const localHistory = localStorage.getItem('chatHistory');
-                    if (localHistory) {
-                        const parsedHistory = JSON.parse(localHistory);
-                        if (Array.isArray(parsedHistory) && parsedHistory.length > 0) {
-                            console.log(`📚 Loaded ${parsedHistory.length} messages from localStorage (fallback)`);
-                            console.log(`🔄 Reassigning conversationHistory from ${conversationHistory.length} to ${parsedHistory.length} messages`);
-                            conversationHistory = parsedHistory;
-                            renderChatHistory();
-                            debugChatHistory(); // Debug the loaded history
-                        }
-                    }
-                } catch (e) {
-                    console.error('❌ Failed to load from localStorage:', e);
-                }
+                console.error('❌ Error loading chat history:', error);
+                conversationHistory = [];
             }
         }
 
@@ -612,6 +585,9 @@
             const message = elements.messageInput.value.trim();
             if (!message || isTyping) return;
             
+            console.log(`📤 sendMessage called with: "${message}"`);
+            console.log(`📊 conversationHistory before user message: ${conversationHistory.length} messages`);
+            
             elements.welcomeMessage.style.display = 'none';
             
             // Add user message to history
@@ -623,7 +599,19 @@
                 timestamp: new Date().toISOString()
             };
             
+            console.log(`👤 Adding user message to history:`, {
+                id: userMessage.id,
+                content: userMessage.content,
+                timestamp: userMessage.timestamp
+            });
+            
             addMessageToHistory(userMessage);
+            
+            console.log(`📊 conversationHistory after user message: ${conversationHistory.length} messages`);
+            console.log(`📋 Current conversationHistory:`, conversationHistory.map((msg, i) => 
+                `${i + 1}. [${msg.sender}] ${msg.content.substring(0, 30)}...`
+            ));
+            
             renderMessage('user', message);
             
             elements.messageInput.value = '';
@@ -637,6 +625,8 @@
                     body: `question=${encodeURIComponent(message)}`
                 });
                 const data = await response.json();
+                
+                console.log(`📊 conversationHistory before assistant response: ${conversationHistory.length} messages`);
                 
                 if (data.error) {
                     const errorMessage = {
@@ -659,6 +649,12 @@
                     addMessageToHistory(assistantMessage);
                     renderMessage('assistant', data.answer, data.sources);
                 }
+                
+                console.log(`📊 conversationHistory after assistant response: ${conversationHistory.length} messages`);
+                console.log(`📋 Final conversationHistory:`, conversationHistory.map((msg, i) => 
+                    `${i + 1}. [${msg.sender}] ${msg.content.substring(0, 30)}...`
+                ));
+                
             } catch (error) {
                 console.error('❌ Query failed:', error);
                 const errorMessage = {
@@ -1080,12 +1076,41 @@
             console.log('🔍 === END MISSING MESSAGE ANALYSIS ===');
         }
         
+        // Monitor conversation history for unexpected changes
+        function monitorConversationHistory() {
+            console.log('🔍 === MONITORING CONVERSATION HISTORY ===');
+            console.log(`📊 Current length: ${conversationHistory.length}`);
+            console.log(`📋 Current messages:`, conversationHistory.map((msg, i) => 
+                `${i + 1}. [${msg.sender}] ${msg.content.substring(0, 30)}...`
+            ));
+            
+            // Set up a periodic check to detect unexpected changes
+            const originalLength = conversationHistory.length;
+            const originalMessages = [...conversationHistory];
+            
+            setInterval(() => {
+                if (conversationHistory.length !== originalLength) {
+                    console.error(`❌ UNEXPECTED CHANGE DETECTED!`);
+                    console.error(`📊 Length changed from ${originalLength} to ${conversationHistory.length}`);
+                    console.error(`📋 Original messages:`, originalMessages.map((msg, i) => 
+                        `${i + 1}. [${msg.sender}] ${msg.content.substring(0, 30)}...`
+                    ));
+                    console.error(`📋 Current messages:`, conversationHistory.map((msg, i) => 
+                        `${i + 1}. [${msg.sender}] ${msg.content.substring(0, 30)}...`
+                    ));
+                }
+            }, 1000);
+            
+            console.log('🔍 === END MONITORING SETUP ===');
+        }
+        
         // Make debug functions available globally
         window.debugChatHistory = debugChatHistory;
         window.checkArrayIntegrity = checkArrayIntegrity;
         window.checkLocalStorage = checkLocalStorage;
         window.testRender = testRender;
         window.identifyMissingMessage = identifyMissingMessage;
+        window.monitorConversationHistory = monitorConversationHistory;
 
         console.log('✅ Legal Document AI Assistant with persistent chat history initialized');
     </script>
