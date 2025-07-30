@@ -54,6 +54,7 @@ General Guidelines:
 - Determine if the user is the customer or the vendor
 - The customer is the Department of Education
 - The vendor is LIFT Alliance
+- Always include the document name used in the response and source list
 
 Task-Oriented Behavior:
 - Always focus on actionable outcomes. For every interaction:
@@ -73,8 +74,7 @@ Document Analysis:
 - Consider the broader context and practical implications
 - Acknowledge limitations and uncertainties openly
 - Structure my responses logically for easy understanding
-- Use plain text formatting only (no Markdown headers like ###)
-- When providing examples, use plain text formatting only (no Markdown headers like ###). Use Heading 1 for the example title.
+- Use rich text formatting (with no Markdown headers like ###)
 
 Proactive Assistance:
 - Anticipate related needs or questions
@@ -250,15 +250,51 @@ def upload_file():
         filename = secure_filename(file.filename)
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         file.save(filepath)
-        result = ingest_legal_document(filepath)
-        if result['success']:
-            return jsonify({
-                'message': f"Document uploaded and processed successfully. {result['total_chunks']} chunks created using {result['extraction_method']}.",
-                'filename': result['filename'],
-                'chunks': result['total_chunks']
-            })
+        
+        # Choose appropriate ingestion method based on file type
+        file_extension = os.path.splitext(filename)[1].lower()
+        
+        if file_extension == '.pdf':
+            # Use legal document processing for PDFs
+            result = ingest_legal_document(filepath)
+            if result['success']:
+                return jsonify({
+                    'message': f"Document uploaded and processed successfully. {result['total_chunks']} chunks created using {result['extraction_method']}.",
+                    'filename': result['filename'],
+                    'chunks': result['total_chunks'],
+                    'document_id': result.get('document_id', '')
+                })
+            else:
+                return jsonify({'error': f"Failed to process document: {result['error']}"}), 500
         else:
-            return jsonify({'error': f"Failed to process document: {result['error']}"}), 500
+            # Use general document processing for other file types
+            from document_rag import DocumentRAG
+            rag = DocumentRAG()
+            result = rag.ingest_document(filepath)
+            
+            if "Successfully ingested" in result:
+                # Extract information from the result string
+                import re
+                chunks_match = re.search(r'(\d+) chunks', result)
+                chunks_count = int(chunks_match.group(1)) if chunks_match else 0
+                
+                # Generate document ID for non-PDF files (consistent with the ingest_document method)
+                import hashlib
+                import time
+                file_stats = os.stat(filepath)
+                doc_hash = hashlib.md5(f"{filename}_{file_stats.st_size}_{file_stats.st_mtime}".encode()).hexdigest()[:8]
+                timestamp = int(time.time())
+                doc_id = f"{filename}_{doc_hash}_{timestamp}"
+                
+                return jsonify({
+                    'message': f"Document uploaded and processed successfully. {chunks_count} chunks created using general processing.",
+                    'filename': filename,
+                    'chunks': chunks_count,
+                    'document_id': doc_id
+                })
+            else:
+                return jsonify({'error': f"Failed to process document: {result}"}), 500
+                
     except Exception as e:
         traceback.print_exc()
         sys.stdout.flush()

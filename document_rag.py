@@ -489,10 +489,20 @@ RESPONSE FORMAT:
                 print(f"[DEBUG] Error in doc_data: {doc_data['error']}")
                 sys.stdout.flush()
                 return f"Error processing {doc_data['filename']}: {doc_data['error']}"
-            # Check if document already exists
+            
+            # Generate unique document identifier (consistent with PDF processing)
+            import hashlib
+            import time
+            filename = doc_data['filename']
+            file_stats = os.stat(file_path)
+            doc_hash = hashlib.md5(f"{filename}_{file_stats.st_size}_{file_stats.st_mtime}".encode()).hexdigest()[:8]
+            timestamp = int(time.time())
+            doc_id = f"{filename}_{doc_hash}_{timestamp}"
+            
+            # Check if document already exists (using new document ID system)
             print("[DEBUG] Checking for existing docs...")
             existing_docs = self.collection.get(
-                where={"doc_hash": doc_data['doc_hash']}
+                where={"document_id": doc_id}
             )
             print(f"[DEBUG] existing_docs: {existing_docs}")
             sys.stdout.flush()
@@ -500,11 +510,13 @@ RESPONSE FORMAT:
                 print("[DEBUG] Document already exists in DB")
                 sys.stdout.flush()
                 return f"Document {doc_data['filename']} already exists in the database"
+            
             # Validate text content
             if len(doc_data['text'].strip()) < 50:
                 print("[DEBUG] Insufficient text content")
                 sys.stdout.flush()
                 return f"Document {doc_data['filename']} contains insufficient text content (less than 50 characters)"
+            
             # Split text into chunks
             print("[DEBUG] Splitting text into chunks...")
             chunks = self.text_splitter.split_text(doc_data['text'])
@@ -514,6 +526,7 @@ RESPONSE FORMAT:
                 print("[DEBUG] No chunks generated")
                 sys.stdout.flush()
                 return f"Document {doc_data['filename']} could not be split into chunks"
+            
             # Generate embeddings
             try:
                 print("[DEBUG] Generating embeddings...")
@@ -525,8 +538,9 @@ RESPONSE FORMAT:
                 traceback.print_exc()
                 sys.stdout.flush()
                 return f"Error generating embeddings for {doc_data['filename']}: {str(e)}"
-            # Prepare data for ChromaDB
-            ids = [f"{doc_data['doc_hash']}_{i}" for i in range(len(chunks))]
+            
+            # Prepare data for ChromaDB with new document ID system
+            ids = [f"{doc_id}_chunk_{i}" for i in range(len(chunks))]
             metadatas = []
             for i, chunk in enumerate(chunks):
                 metadata = {
@@ -538,9 +552,12 @@ RESPONSE FORMAT:
                     "total_chunks": len(chunks),
                     "text_length": doc_data['text_length'],
                     "extraction_method": doc_data['extraction_method'],
-                    "processed_time": doc_data['processed_time']
+                    "processed_time": doc_data['processed_time'],
+                    "document_id": doc_id,
+                    "upload_timestamp": str(timestamp)
                 }
                 metadatas.append(metadata)
+            
             # Add to ChromaDB
             try:
                 print("[DEBUG] Adding to ChromaDB...")
@@ -557,6 +574,7 @@ RESPONSE FORMAT:
                 traceback.print_exc()
                 sys.stdout.flush()
                 return f"Error storing {doc_data['filename']} in database: {str(e)}"
+            
             print("[DEBUG] Successfully ingested document")
             sys.stdout.flush()
             return f"Successfully ingested {doc_data['filename']} with {len(chunks)} chunks ({doc_data['text_length']} characters)"
