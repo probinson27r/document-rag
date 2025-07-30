@@ -165,9 +165,13 @@ def ingest_legal_document(file_path: str) -> dict:
         result = process_legal_pdf_nemo(file_path)
         chunks = result['chunks']
         extraction_method = result['extraction_method']
+        document_id = result['document_id']
+        filename = result['filename']
+        
         documents = []
         metadatas = []
         ids = []
+        
         for chunk in chunks:
             chunk_id = chunk['chunk_id']
             content = chunk['content']
@@ -176,6 +180,7 @@ def ingest_legal_document(file_path: str) -> dict:
             section_title = chunk.get('section_title')
             pages = chunk.get('pages', [])
             cross_references = chunk.get('cross_references', [])
+            
             metadata = {
                 'chunk_type': str(chunk_type) if chunk_type else '',
                 'section_number': str(section_number) if section_number else '',
@@ -183,11 +188,16 @@ def ingest_legal_document(file_path: str) -> dict:
                 'pages': ','.join(map(str, pages)) if pages else '',
                 'cross_references': ','.join(cross_references) if cross_references else '',
                 'extraction_method': str(extraction_method) if extraction_method else '',
-                'character_count': str(len(content))
+                'character_count': str(len(content)),
+                'document_id': chunk.get('document_id', document_id),
+                'filename': chunk.get('filename', filename),
+                'upload_timestamp': str(chunk.get('upload_timestamp', ''))
             }
+            
             documents.append(content)
             metadatas.append(metadata)
             ids.append(chunk_id)
+        
         if documents:
             embeddings = embedding_model.encode(documents).tolist()
             collection.add(
@@ -196,12 +206,14 @@ def ingest_legal_document(file_path: str) -> dict:
                 metadatas=metadatas,
                 ids=ids
             )
-            logger.info(f"Added {len(documents)} chunks to ChromaDB")
+            logger.info(f"Added {len(documents)} chunks to ChromaDB for document {filename} (ID: {document_id})")
+        
         return {
             'success': True,
             'total_chunks': len(chunks),
             'extraction_method': extraction_method,
-            'filename': os.path.basename(file_path)
+            'filename': filename,
+            'document_id': document_id
         }
     except Exception as e:
         logger.error(f"Error ingesting legal document: {e}")
@@ -488,21 +500,37 @@ def api_documents():
         # Get all documents from ChromaDB
         results = collection.get()
         
-        # Group by document (assuming filename is in metadata)
+        # Group by document using document_id from metadata
         documents = {}
         for i, metadata in enumerate(results['metadatas']):
-            # Extract filename from chunk_id or use a default
-            chunk_id = results['ids'][i]
-            filename = chunk_id.split('_')[0] if '_' in chunk_id else 'Unknown'
+            # Use document_id from metadata if available, otherwise fall back to filename
+            document_id = metadata.get('document_id', '')
+            filename = metadata.get('filename', '')
             
-            if filename not in documents:
-                documents[filename] = {
+            if not document_id and not filename:
+                # Fallback: try to extract from chunk_id (for backward compatibility)
+                chunk_id = results['ids'][i]
+                if '_chunk_' in chunk_id:
+                    # New format: document_id_chunk_number
+                    document_id = chunk_id.split('_chunk_')[0]
+                    filename = document_id.split('_')[0] if '_' in document_id else document_id
+                else:
+                    # Old format: try to extract filename
+                    filename = chunk_id.split('_')[0] if '_' in chunk_id else 'Unknown'
+                    document_id = filename
+            
+            # Use document_id as the key for grouping
+            if document_id not in documents:
+                documents[document_id] = {
+                    'document_id': document_id,
                     'filename': filename,
                     'total_chunks': 0,
-                    'file_type': '.pdf'
+                    'file_type': '.pdf',
+                    'upload_timestamp': metadata.get('upload_timestamp', ''),
+                    'extraction_method': metadata.get('extraction_method', 'unknown')
                 }
             
-            documents[filename]['total_chunks'] += 1
+            documents[document_id]['total_chunks'] += 1
         
         return jsonify(list(documents.values()))
         
@@ -514,13 +542,25 @@ def api_documents():
 def api_document_chunks(filename):
     """Get chunks for a specific document"""
     try:
-        # Get all chunks and filter by filename
+        # Get all chunks and filter by document
         results = collection.get()
         
         chunks = []
         for i, (chunk_id, content, metadata) in enumerate(zip(results['ids'], results['documents'], results['metadatas'])):
             # Check if this chunk belongs to the requested document
-            if filename in chunk_id or metadata.get('section_title', '').startswith(filename):
+            # Support both filename and document_id matching
+            document_id = metadata.get('document_id', '')
+            doc_filename = metadata.get('filename', '')
+            
+            # Match by document_id, filename, or chunk_id prefix
+            is_match = (
+                document_id == filename or 
+                doc_filename == filename or
+                chunk_id.startswith(f"{filename}_") or
+                (document_id and document_id.split('_')[0] == filename)
+            )
+            
+            if is_match:
                 chunks.append({
                     'index': i,
                     'text': content,
@@ -529,7 +569,9 @@ def api_document_chunks(filename):
                     'section_number': metadata.get('section_number', 'Unknown'),
                     'section_title': metadata.get('section_title', 'Unknown'),
                     'pages': metadata.get('pages', ''),
-                    'cross_references': metadata.get('cross_references', '')
+                    'cross_references': metadata.get('cross_references', ''),
+                    'document_id': document_id,
+                    'chunk_id': chunk_id
                 })
         
         return jsonify({
@@ -568,7 +610,19 @@ def api_document_search(filename):
             results['distances'][0]
         )):
             # Check if this chunk belongs to the requested document
-            if filename in chunk_id or metadata.get('section_title', '').startswith(filename):
+            # Support both filename and document_id matching
+            document_id = metadata.get('document_id', '')
+            doc_filename = metadata.get('filename', '')
+            
+            # Match by document_id, filename, or chunk_id prefix
+            is_match = (
+                document_id == filename or 
+                doc_filename == filename or
+                chunk_id.startswith(f"{filename}_") or
+                (document_id and document_id.split('_')[0] == filename)
+            )
+            
+            if is_match:
                 filtered_results.append({
                     'index': i,
                     'text': content,
@@ -576,12 +630,15 @@ def api_document_search(filename):
                     'similarity_score': 1 - distance,  # Convert distance to similarity
                     'chunk_type': metadata.get('chunk_type', 'Unknown'),
                     'section_number': metadata.get('section_number', 'Unknown'),
-                    'section_title': metadata.get('section_title', 'Unknown')
+                    'section_title': metadata.get('section_title', 'Unknown'),
+                    'document_id': document_id,
+                    'chunk_id': chunk_id
                 })
         
         return jsonify({
             'filename': filename,
             'query': query,
+            'total_results': len(filtered_results),
             'results': filtered_results
         })
         
@@ -593,24 +650,97 @@ def api_document_search(filename):
 def api_delete_document(filename):
     """Delete a document and its chunks"""
     try:
-        # Get all chunks and filter by filename
+        # Get all chunks and filter by document
         results = collection.get()
         
         # Find chunks to delete
         chunks_to_delete = []
-        for chunk_id in results['ids']:
-            if filename in chunk_id:
+        for i, (chunk_id, metadata) in enumerate(zip(results['ids'], results['metadatas'])):
+            # Check if this chunk belongs to the requested document
+            # Support both filename and document_id matching
+            document_id = metadata.get('document_id', '')
+            doc_filename = metadata.get('filename', '')
+            
+            # Match by document_id, filename, or chunk_id prefix
+            is_match = (
+                document_id == filename or 
+                doc_filename == filename or
+                chunk_id.startswith(f"{filename}_") or
+                (document_id and document_id.split('_')[0] == filename)
+            )
+            
+            if is_match:
                 chunks_to_delete.append(chunk_id)
         
         # Delete chunks
         if chunks_to_delete:
             collection.delete(ids=chunks_to_delete)
             logger.info(f"Deleted {len(chunks_to_delete)} chunks for document {filename}")
-        
-        return jsonify({'message': f'Document {filename} deleted successfully'})
+            return jsonify({
+                'success': True,
+                'message': f'Document {filename} deleted successfully',
+                'deleted_chunks': len(chunks_to_delete)
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'message': f'Document {filename} not found'
+            }), 404
         
     except Exception as e:
         logger.error(f"Error deleting document: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/documents/id/<document_id>')
+def api_document_by_id(document_id):
+    """Get document information by document ID"""
+    try:
+        # Get all chunks and filter by document ID
+        results = collection.get()
+        
+        document_info = None
+        chunks = []
+        
+        for i, (chunk_id, content, metadata) in enumerate(zip(results['ids'], results['documents'], results['metadatas'])):
+            # Check if this chunk belongs to the requested document
+            chunk_document_id = metadata.get('document_id', '')
+            
+            if chunk_document_id == document_id:
+                if document_info is None:
+                    # Initialize document info from first matching chunk
+                    document_info = {
+                        'document_id': document_id,
+                        'filename': metadata.get('filename', ''),
+                        'total_chunks': 0,
+                        'file_type': '.pdf',
+                        'upload_timestamp': metadata.get('upload_timestamp', ''),
+                        'extraction_method': metadata.get('extraction_method', 'unknown')
+                    }
+                
+                document_info['total_chunks'] += 1
+                
+                chunks.append({
+                    'index': i,
+                    'text': content,
+                    'length': len(content),
+                    'chunk_type': metadata.get('chunk_type', 'Unknown'),
+                    'section_number': metadata.get('section_number', 'Unknown'),
+                    'section_title': metadata.get('section_title', 'Unknown'),
+                    'pages': metadata.get('pages', ''),
+                    'cross_references': metadata.get('cross_references', ''),
+                    'chunk_id': chunk_id
+                })
+        
+        if document_info:
+            return jsonify({
+                'document': document_info,
+                'chunks': chunks
+            })
+        else:
+            return jsonify({'error': 'Document not found'}), 404
+        
+    except Exception as e:
+        logger.error(f"Error getting document by ID: {e}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/instructions', methods=['GET', 'POST'])
