@@ -14,6 +14,13 @@ import requests
 from datetime import datetime
 from flask_session import Session
 
+# Import GPT-4 extraction availability
+try:
+    from gpt4_extraction import GPT4Extractor
+    GPT4_EXTRACTION_AVAILABLE = True
+except ImportError:
+    GPT4_EXTRACTION_AVAILABLE = False
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -162,7 +169,123 @@ def ingest_legal_document(file_path: str) -> dict:
     """Ingest a legal document using NeMo Retriever only"""
     try:
         logger.info(f"Processing legal document: {file_path} using NeMo Retriever")
-        result = process_legal_pdf_nemo(file_path)
+        
+        # Get extraction configuration
+        extraction_config = session.get('extraction_config', {
+            'extraction_method': 'auto',
+            'gpt4_model': 'gpt-4o',
+            'features': {
+                'text_enhancement': True,
+                'structured_data': True,
+                'contract_analysis': True,
+                'document_summary': False
+            }
+        })
+        
+        # Process document based on extraction method
+        extraction_method = extraction_config.get('extraction_method', 'auto')
+        
+        if extraction_method == 'traditional':
+            # Use traditional processing only
+            result = process_legal_pdf_nemo(file_path)
+        elif extraction_method == 'gpt4_enhanced':
+            # Use GPT-4 enhanced processing
+            result = process_legal_pdf_nemo(file_path)
+            
+            # Apply GPT-4 enhancements if available
+            if GPT4_EXTRACTION_AVAILABLE:
+                try:
+                    from gpt4_extraction import GPT4Extractor
+                    extractor = GPT4Extractor(
+                        openai_api_key=os.getenv('OPENAI_API_KEY'),
+                        anthropic_api_key=os.getenv('ANTHROPIC_API_KEY'),
+                        private_gpt4_url=os.getenv('PRIVATE_GPT4_URL'),
+                        private_gpt4_key=os.getenv('PRIVATE_GPT4_API_KEY')
+                    )
+                    
+                    # Enhance chunks with GPT-4
+                    enhanced_chunks = []
+                    for chunk in result['chunks']:
+                        enhanced_chunk = chunk.copy()
+                        
+                        # Text enhancement
+                        if extraction_config['features'].get('text_enhancement', True):
+                            enhancement_result = extractor.enhance_text_extraction(chunk['content'], '.pdf')
+                            if enhancement_result.get('success'):
+                                enhanced_chunk['content'] = enhancement_result['extracted_data'].get('enhanced_text', chunk['content'])
+                                enhanced_chunk['gpt4_enhancement'] = enhancement_result['extracted_data']
+                        
+                        # Structured data extraction
+                        if extraction_config['features'].get('structured_data', True):
+                            data_types = ['dates', 'names', 'amounts', 'key_terms']
+                            if extraction_config['features'].get('contract_analysis', True):
+                                data_types.extend(['contracts', 'references'])
+                            
+                            structured_result = extractor.extract_structured_data(chunk['content'], data_types)
+                            if structured_result.get('success'):
+                                enhanced_chunk['structured_data'] = structured_result['extracted_data']
+                        
+                        # Contract analysis
+                        if extraction_config['features'].get('contract_analysis', True):
+                            contract_result = extractor.extract_legal_contract_data(chunk['content'])
+                            if contract_result.get('success'):
+                                enhanced_chunk['contract_analysis'] = contract_result['extracted_data']
+                        
+                        enhanced_chunks.append(enhanced_chunk)
+                    
+                    result['chunks'] = enhanced_chunks
+                    result['extraction_method'] = 'pymupdf_enhanced_with_gpt4'
+                    
+                except Exception as e:
+                    logger.warning(f"GPT-4 enhancement failed, using traditional processing: {e}")
+                    result['extraction_method'] = 'pymupdf_enhanced_fallback'
+        else:  # auto
+            # Auto-detect: use GPT-4 if available, otherwise traditional
+            result = process_legal_pdf_nemo(file_path)
+            
+            # Try GPT-4 enhancement if available
+            if GPT4_EXTRACTION_AVAILABLE:
+                try:
+                    from gpt4_extraction import GPT4Extractor
+                    extractor = GPT4Extractor(
+                        openai_api_key=os.getenv('OPENAI_API_KEY'),
+                        anthropic_api_key=os.getenv('ANTHROPIC_API_KEY'),
+                        private_gpt4_url=os.getenv('PRIVATE_GPT4_URL'),
+                        private_gpt4_key=os.getenv('PRIVATE_GPT4_API_KEY')
+                    )
+                    
+                    # Quick test to see if GPT-4 is working
+                    test_result = extractor.extract_structured_data("Test", ['dates'])
+                    if test_result.get('success'):
+                        # GPT-4 is available, enhance the document
+                        enhanced_chunks = []
+                        for chunk in result['chunks']:
+                            enhanced_chunk = chunk.copy()
+                            
+                            # Apply enabled features
+                            if extraction_config['features'].get('text_enhancement', True):
+                                enhancement_result = extractor.enhance_text_extraction(chunk['content'], '.pdf')
+                                if enhancement_result.get('success'):
+                                    enhanced_chunk['content'] = enhancement_result['extracted_data'].get('enhanced_text', chunk['content'])
+                            
+                            if extraction_config['features'].get('structured_data', True):
+                                data_types = ['dates', 'names', 'amounts', 'key_terms']
+                                if extraction_config['features'].get('contract_analysis', True):
+                                    data_types.extend(['contracts', 'references'])
+                                
+                                structured_result = extractor.extract_structured_data(chunk['content'], data_types)
+                                if structured_result.get('success'):
+                                    enhanced_chunk['structured_data'] = structured_result['extracted_data']
+                            
+                            enhanced_chunks.append(enhanced_chunk)
+                        
+                        result['chunks'] = enhanced_chunks
+                        result['extraction_method'] = 'pymupdf_enhanced_with_gpt4_auto'
+                    
+                except Exception as e:
+                    logger.info(f"GPT-4 not available for auto mode, using traditional processing: {e}")
+                    result['extraction_method'] = 'pymupdf_enhanced_auto_fallback'
+        
         chunks = result['chunks']
         extraction_method = result['extraction_method']
         document_id = result['document_id']
@@ -194,6 +317,16 @@ def ingest_legal_document(file_path: str) -> dict:
                 'upload_timestamp': str(chunk.get('upload_timestamp', ''))
             }
             
+            # Add GPT-4 enhancement metadata if available
+            if 'gpt4_enhancement' in chunk:
+                metadata['gpt4_enhancement'] = json.dumps(chunk['gpt4_enhancement'])
+            
+            if 'structured_data' in chunk:
+                metadata['structured_data'] = json.dumps(chunk['structured_data'])
+            
+            if 'contract_analysis' in chunk:
+                metadata['contract_analysis'] = json.dumps(chunk['contract_analysis'])
+            
             documents.append(content)
             metadatas.append(metadata)
             ids.append(chunk_id)
@@ -207,7 +340,7 @@ def ingest_legal_document(file_path: str) -> dict:
                 ids=ids
             )
             logger.info(f"Added {len(documents)} chunks to ChromaDB for document {filename} (ID: {document_id})")
-        
+
         return {
             'success': True,
             'total_chunks': len(chunks),
@@ -1101,6 +1234,117 @@ def api_test_gpt4_extraction():
         
     except Exception as e:
         logger.error(f"GPT-4 test extraction error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/extraction/config', methods=['GET'])
+def api_get_extraction_config():
+    """Get current extraction configuration"""
+    try:
+        # Default configuration
+        config = {
+            'extraction_method': 'auto',  # auto, gpt4_enhanced, traditional
+            'gpt4_model': 'gpt-4o',
+            'features': {
+                'text_enhancement': True,
+                'structured_data': True,
+                'contract_analysis': True,
+                'document_summary': False
+            }
+        }
+        
+        # Try to load from session or file
+        if 'extraction_config' in session:
+            config.update(session['extraction_config'])
+        
+        return jsonify(config)
+        
+    except Exception as e:
+        logger.error(f"Error getting extraction config: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/extraction/config', methods=['POST'])
+def api_save_extraction_config():
+    """Save extraction configuration"""
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'No configuration data provided'}), 400
+        
+        # Validate configuration
+        valid_methods = ['auto', 'gpt4_enhanced', 'traditional']
+        if data.get('extraction_method') not in valid_methods:
+            return jsonify({'error': f'Invalid extraction method. Must be one of: {valid_methods}'}), 400
+        
+        valid_models = ['gpt-4o', 'gpt-4', 'claude-3-5-sonnet-20241022']
+        if data.get('gpt4_model') not in valid_models:
+            return jsonify({'error': f'Invalid GPT-4 model. Must be one of: {valid_models}'}), 400
+        
+        # Save to session
+        session['extraction_config'] = {
+            'extraction_method': data.get('extraction_method', 'auto'),
+            'gpt4_model': data.get('gpt4_model', 'gpt-4o'),
+            'features': {
+                'text_enhancement': data.get('features', {}).get('text_enhancement', True),
+                'structured_data': data.get('features', {}).get('structured_data', True),
+                'contract_analysis': data.get('features', {}).get('contract_analysis', True),
+                'document_summary': data.get('features', {}).get('document_summary', False)
+            }
+        }
+        
+        logger.info(f"Extraction configuration saved: {session['extraction_config']}")
+        
+        return jsonify({
+            'success': True,
+            'message': 'Extraction configuration saved successfully',
+            'config': session['extraction_config']
+        })
+        
+    except Exception as e:
+        logger.error(f"Error saving extraction config: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/extraction/status', methods=['GET'])
+def api_extraction_status():
+    """Get extraction system status and capabilities"""
+    try:
+        # Check GPT-4 availability
+        gpt4_available = False
+        available_models = []
+        
+        if os.getenv('OPENAI_API_KEY'):
+            gpt4_available = True
+            available_models.append('gpt-4o')
+            available_models.append('gpt-4')
+        
+        if os.getenv('ANTHROPIC_API_KEY'):
+            gpt4_available = True
+            available_models.append('claude-3-5-sonnet-20241022')
+        
+        if os.getenv('PRIVATE_GPT4_URL') and os.getenv('PRIVATE_GPT4_API_KEY'):
+            gpt4_available = True
+            available_models.append('private-gpt-4')
+        
+        # Get current configuration
+        config = session.get('extraction_config', {
+            'extraction_method': 'auto',
+            'gpt4_model': 'gpt-4o',
+            'features': {
+                'text_enhancement': True,
+                'structured_data': True,
+                'contract_analysis': True,
+                'document_summary': False
+            }
+        })
+        
+        return jsonify({
+            'gpt4_available': gpt4_available,
+            'available_models': available_models,
+            'current_config': config,
+            'system_status': 'operational' if gpt4_available else 'limited'
+        })
+        
+    except Exception as e:
+        logger.error(f"Error getting extraction status: {e}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/contract')
