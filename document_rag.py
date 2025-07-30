@@ -16,6 +16,14 @@ from chromadb.config import Settings
 import pdfplumber
 import re
 from langchain.text_splitter import RecursiveCharacterTextSplitter
+
+# GPT-4 extraction
+try:
+    from gpt4_extraction import GPT4Extractor
+    GPT4_EXTRACTION_AVAILABLE = True
+except ImportError:
+    GPT4_EXTRACTION_AVAILABLE = False
+
 # Donut dependencies
 try:
     from transformers import DonutProcessor, VisionEncoderDecoderModel
@@ -38,8 +46,24 @@ import traceback
 class DocumentProcessor:
     """Handles document ingestion and text extraction"""
     
-    def __init__(self):
+    def __init__(self, use_gpt4_enhancement: bool = True):
         self.supported_formats = ['.pdf', '.docx', '.txt', '.csv', '.json']
+        self.use_gpt4_enhancement = use_gpt4_enhancement and GPT4_EXTRACTION_AVAILABLE
+        
+        # Initialize GPT-4 extractor if available
+        self.gpt4_extractor = None
+        if self.use_gpt4_enhancement:
+            try:
+                self.gpt4_extractor = GPT4Extractor(
+                    openai_api_key=os.getenv('OPENAI_API_KEY'),
+                    anthropic_api_key=os.getenv('ANTHROPIC_API_KEY'),
+                    private_gpt4_url=os.getenv('PRIVATE_GPT4_URL'),
+                    private_gpt4_key=os.getenv('PRIVATE_GPT4_API_KEY')
+                )
+                print("[GPT-4] GPT-4 extraction enabled")
+            except Exception as e:
+                print(f"[GPT-4] Failed to initialize GPT-4 extractor: {e}")
+                self.use_gpt4_enhancement = False
     
     def join_headings_with_content(self, text: str) -> str:
         """Join headings (short, title-like lines) with their following content."""
@@ -297,11 +321,30 @@ class DocumentProcessor:
             if not text or len(text.strip()) < 10:
                 raise ValueError("Document appears to be empty or contains no extractable text")
             
+            # Enhance text using GPT-4 if available
+            enhanced_data = None
+            if self.use_gpt4_enhancement and self.gpt4_extractor:
+                enhanced_data = self.enhance_text_with_gpt4(text, file_extension)
+                text = enhanced_data["enhanced_text"]
+                print(f"[GPT-4] Enhanced text length: {len(text)}")
+            
+            # Extract structured data using GPT-4 if available
+            structured_data = None
+            if self.use_gpt4_enhancement and self.gpt4_extractor:
+                # Extract common data types
+                data_types = ["dates", "names", "amounts", "key_terms"]
+                if file_extension == '.pdf':
+                    data_types.extend(["contracts", "references"])
+                
+                structured_data = self.extract_structured_data_with_gpt4(text, data_types)
+                print(f"[GPT-4] Extracted structured data: {len(structured_data.get('extracted_data', {}))} data types")
+            
             # Generate document metadata
             file_stats = path.stat()
             doc_hash = hashlib.md5(text.encode('utf-8')).hexdigest()
             
-            return {
+            # Build metadata
+            metadata = {
                 'filename': path.name,
                 'filepath': str(path),
                 'file_size': file_stats.st_size,
@@ -313,6 +356,20 @@ class DocumentProcessor:
                 'processed_time': datetime.now().isoformat(),
                 'extraction_method': self._get_extraction_method(file_extension)
             }
+            
+            # Add GPT-4 enhancement metadata
+            if enhanced_data:
+                metadata['gpt4_enhancement'] = {
+                    'quality_score': enhanced_data.get('quality_score', 0.5),
+                    'processing_notes': enhanced_data.get('processing_notes', ''),
+                    'extracted_metadata': enhanced_data.get('metadata', {})
+                }
+            
+            # Add structured data
+            if structured_data:
+                metadata['structured_data'] = structured_data
+            
+            return metadata
             
         except Exception as e:
             # Return error information for debugging
@@ -335,6 +392,100 @@ class DocumentProcessor:
             '.json': 'json module'
         }
         return methods.get(file_extension, 'unknown')
+    
+    def enhance_text_with_gpt4(self, raw_text: str, file_type: str) -> Dict[str, Any]:
+        """
+        Enhance extracted text using GPT-4
+        
+        Args:
+            raw_text: Raw extracted text
+            file_type: Type of file (.pdf, .docx, etc.)
+            
+        Returns:
+            Dictionary with enhanced text and metadata
+        """
+        if not self.use_gpt4_enhancement or not self.gpt4_extractor:
+            return {
+                "enhanced_text": raw_text,
+                "metadata": {},
+                "quality_score": 0.5,
+                "processing_notes": "GPT-4 enhancement not available"
+            }
+        
+        try:
+            print(f"[GPT-4] Enhancing {file_type} text extraction...")
+            result = self.gpt4_extractor.enhance_text_extraction(raw_text, file_type)
+            
+            if result.get("success"):
+                enhanced_data = result.get("extracted_data", {})
+                enhanced_text = enhanced_data.get("enhanced_text", raw_text)
+                metadata = enhanced_data.get("metadata", {})
+                quality_score = enhanced_data.get("quality_score", 0.5)
+                
+                print(f"[GPT-4] Text enhancement completed (quality: {quality_score})")
+                return {
+                    "enhanced_text": enhanced_text,
+                    "metadata": metadata,
+                    "quality_score": quality_score,
+                    "processing_notes": "GPT-4 enhanced extraction"
+                }
+            else:
+                print(f"[GPT-4] Enhancement failed: {result.get('error', 'Unknown error')}")
+                return {
+                    "enhanced_text": raw_text,
+                    "metadata": {},
+                    "quality_score": 0.5,
+                    "processing_notes": f"GPT-4 enhancement failed: {result.get('error', 'Unknown error')}"
+                }
+                
+        except Exception as e:
+            print(f"[GPT-4] Enhancement error: {e}")
+            return {
+                "enhanced_text": raw_text,
+                "metadata": {},
+                "quality_score": 0.5,
+                "processing_notes": f"GPT-4 enhancement error: {str(e)}"
+            }
+    
+    def extract_structured_data_with_gpt4(self, text: str, data_types: List[str]) -> Dict[str, Any]:
+        """
+        Extract structured data using GPT-4
+        
+        Args:
+            text: Document text
+            data_types: List of data types to extract
+            
+        Returns:
+            Extracted structured data
+        """
+        if not self.use_gpt4_enhancement or not self.gpt4_extractor:
+            return {
+                "extracted_data": {},
+                "confidence_scores": {},
+                "processing_summary": "GPT-4 extraction not available"
+            }
+        
+        try:
+            print(f"[GPT-4] Extracting structured data: {data_types}")
+            result = self.gpt4_extractor.extract_structured_data(text, data_types)
+            
+            if result.get("success"):
+                return result.get("extracted_data", {})
+            else:
+                print(f"[GPT-4] Structured data extraction failed: {result.get('error', 'Unknown error')}")
+                return {
+                    "extracted_data": {},
+                    "confidence_scores": {},
+                    "processing_summary": f"GPT-4 extraction failed: {result.get('error', 'Unknown error')}"
+                }
+                
+        except Exception as e:
+            print(f"[GPT-4] Structured data extraction error: {e}")
+            return {
+                "extracted_data": {},
+                "confidence_scores": {},
+                "processing_summary": f"GPT-4 extraction error: {str(e)}"
+            }
 
 class OllamaClient:
     def __init__(self, base_url: str = "http://localhost:11434"):  # Should be localhost:11434

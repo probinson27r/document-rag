@@ -996,6 +996,113 @@ def api_import_chat_history():
         logger.error(f"Error importing chat history: {e}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/extract/gpt4', methods=['POST'])
+def api_gpt4_extraction():
+    """Extract data using GPT-4"""
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'No data provided'}), 400
+        
+        text = data.get('text', '').strip()
+        extraction_type = data.get('type', 'enhance')  # enhance, structured, summary, contract
+        data_types = data.get('data_types', [])  # for structured extraction
+        model = data.get('model', 'gpt-4o')  # model to use
+        
+        if not text:
+            return jsonify({'error': 'No text provided'}), 400
+        
+        # Initialize GPT-4 extractor
+        from gpt4_extraction import GPT4Extractor
+        extractor = GPT4Extractor(
+            openai_api_key=os.getenv('OPENAI_API_KEY'),
+            anthropic_api_key=os.getenv('ANTHROPIC_API_KEY'),
+            private_gpt4_url=os.getenv('PRIVATE_GPT4_URL'),
+            private_gpt4_key=os.getenv('PRIVATE_GPT4_API_KEY')
+        )
+        
+        # Perform extraction based on type
+        if extraction_type == 'enhance':
+            result = extractor.enhance_text_extraction(text, '.txt')
+        elif extraction_type == 'structured':
+            if not data_types:
+                data_types = ['dates', 'names', 'amounts', 'key_terms']
+            result = extractor.extract_structured_data(text, data_types)
+        elif extraction_type == 'summary':
+            summary_type = data.get('summary_type', 'comprehensive')
+            result = extractor.generate_document_summary(text, summary_type)
+        elif extraction_type == 'contract':
+            result = extractor.extract_legal_contract_data(text)
+        elif extraction_type == 'clean':
+            preserve_structure = data.get('preserve_structure', True)
+            result = extractor.clean_and_format_text(text, preserve_structure)
+        else:
+            return jsonify({'error': f'Unknown extraction type: {extraction_type}'}), 400
+        
+        return jsonify({
+            'success': True,
+            'extraction_type': extraction_type,
+            'model': model,
+            'result': result
+        })
+        
+    except Exception as e:
+        logger.error(f"GPT-4 extraction error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/extract/test', methods=['POST'])
+def api_test_gpt4_extraction():
+    """Test GPT-4 extraction with sample data"""
+    try:
+        sample_text = """
+        CONTRACT AGREEMENT
+        
+        This agreement is made between ABC Company and XYZ Corporation.
+        
+        Effective Date: January 1, 2024
+        Contract Value: $500,000
+        
+        Section 1: Services
+        The vendor shall provide IT consulting services.
+        
+        Section 2: Payment Terms
+        Payment shall be made within 30 days of invoice.
+        """
+        
+        # Initialize GPT-4 extractor
+        from gpt4_extraction import GPT4Extractor
+        extractor = GPT4Extractor(
+            openai_api_key=os.getenv('OPENAI_API_KEY'),
+            anthropic_api_key=os.getenv('ANTHROPIC_API_KEY'),
+            private_gpt4_url=os.getenv('PRIVATE_GPT4_URL'),
+            private_gpt4_key=os.getenv('PRIVATE_GPT4_API_KEY')
+        )
+        
+        # Test different extraction methods
+        results = {}
+        
+        # Test text enhancement
+        results['enhancement'] = extractor.enhance_text_extraction(sample_text, '.txt')
+        
+        # Test structured data extraction
+        results['structured'] = extractor.extract_structured_data(sample_text, ['dates', 'names', 'amounts'])
+        
+        # Test contract data extraction
+        results['contract'] = extractor.extract_legal_contract_data(sample_text)
+        
+        # Test document summary
+        results['summary'] = extractor.generate_document_summary(sample_text, 'key_points')
+        
+        return jsonify({
+            'success': True,
+            'sample_text': sample_text,
+            'results': results
+        })
+        
+    except Exception as e:
+        logger.error(f"GPT-4 test extraction error: {e}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/contract')
 def contract_viewer_page():
     return render_template('contract_viewer.html')
