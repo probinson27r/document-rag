@@ -121,6 +121,66 @@
                 <option value="">Loading models...</option>
             </select>
         </div>
+        
+        <div class="section-title">Extraction Configuration</div>
+        <div class="model-section">
+            <label class="model-label" for="extractionMethodSelect">Document Extraction Method</label>
+            <select class="model-select" id="extractionMethodSelect">
+                <option value="auto">Auto (Best Available)</option>
+                <option value="gpt4_enhanced">GPT-4 Enhanced</option>
+                <option value="traditional">Traditional Only</option>
+            </select>
+            <div style="font-size: 11px; color: #6b7280; margin-top: 4px;">
+                GPT-4 Enhanced: Uses AI to improve text extraction and extract structured data
+            </div>
+        </div>
+        
+        <div class="model-section">
+            <label class="model-label">GPT-4 Extraction Features</label>
+            <div style="background: #f9fafb; border-radius: 6px; padding: 12px; margin-bottom: 8px;">
+                <label style="display: flex; align-items: center; margin-bottom: 8px; font-size: 12px;">
+                    <input type="checkbox" id="enableTextEnhancement" checked style="margin-right: 8px;">
+                    Text Enhancement (Clean & format extracted text)
+                </label>
+                <label style="display: flex; align-items: center; margin-bottom: 8px; font-size: 12px;">
+                    <input type="checkbox" id="enableStructuredData" checked style="margin-right: 8px;">
+                    Structured Data Extraction (Dates, names, amounts, etc.)
+                </label>
+                <label style="display: flex; align-items: center; margin-bottom: 8px; font-size: 12px;">
+                    <input type="checkbox" id="enableContractAnalysis" checked style="margin-right: 8px;">
+                    Contract Analysis (Legal document insights)
+                </label>
+                <label style="display: flex; align-items: center; font-size: 12px;">
+                    <input type="checkbox" id="enableDocumentSummary" style="margin-right: 8px;">
+                    Document Summary (Generate summaries)
+                </label>
+            </div>
+        </div>
+        
+        <div class="model-section">
+            <label class="model-label" for="gpt4ModelSelect">GPT-4 Model</label>
+            <select class="model-select" id="gpt4ModelSelect">
+                <option value="gpt-4o">GPT-4o (Fast & Cost-effective)</option>
+                <option value="gpt-4">GPT-4 (High Quality)</option>
+                <option value="claude-3-5-sonnet-20241022">Claude 3.5 Sonnet</option>
+            </select>
+        </div>
+        
+        <div class="model-section">
+            <label class="model-label">Extraction System Status</label>
+            <div id="extractionStatus" style="background: #f9fafb; border-radius: 6px; padding: 12px; font-size: 12px;">
+                <div style="display: flex; align-items: center; margin-bottom: 8px;">
+                    <span id="statusIndicator" style="width: 8px; height: 8px; border-radius: 50%; background: #6b7280; margin-right: 8px;"></span>
+                    <span id="statusText">Checking system status...</span>
+                </div>
+                <div id="statusDetails" style="color: #6b7280; font-size: 11px;">
+                    Loading capabilities...
+                </div>
+                <button id="testExtractionBtn" class="instructions-btn" style="margin-top: 8px; font-size: 11px; padding: 4px 12px;">
+                    Test Extraction
+                </button>
+            </div>
+        </div>
         <div class="section-title">AI Instructions</div>
         <div class="instructions-section">
             <textarea class="instructions-textarea" id="instructionsTextarea" 
@@ -135,6 +195,12 @@
             <div>📄 Drop legal documents here or click to browse</div>
             <div style="font-size: 12px; margin-top: 5px; opacity: 0.7;">
                 PDF, DOCX, TXT, CSV, JSON
+            </div>
+            <div id="uploadProgress" style="display: none; margin-top: 10px;">
+                <div style="background: #e5e7eb; border-radius: 4px; height: 6px; overflow: hidden;">
+                    <div id="progressBar" style="background: #3b82f6; height: 100%; width: 0%; transition: width 0.3s ease;"></div>
+                </div>
+                <div id="progressText" style="font-size: 11px; color: #6b7280; margin-top: 4px;">0%</div>
             </div>
         </div>
         <input type="file" class="file-input" id="fileInput" 
@@ -179,6 +245,118 @@
             });
         } catch (error) {
             modelSelect.innerHTML = '<option>Error loading models</option>';
+        }
+    }
+    
+    // Extraction configuration
+    async function loadExtractionConfig() {
+        try {
+            const response = await fetch('/api/extraction/config');
+            const data = await response.json();
+            
+            // Set extraction method
+            const extractionMethodSelect = document.getElementById('extractionMethodSelect');
+            extractionMethodSelect.value = data.extraction_method || 'auto';
+            
+            // Set GPT-4 model
+            const gpt4ModelSelect = document.getElementById('gpt4ModelSelect');
+            gpt4ModelSelect.value = data.gpt4_model || 'gpt-4o';
+            
+            // Set feature checkboxes
+            document.getElementById('enableTextEnhancement').checked = data.features?.text_enhancement !== false;
+            document.getElementById('enableStructuredData').checked = data.features?.structured_data !== false;
+            document.getElementById('enableContractAnalysis').checked = data.features?.contract_analysis !== false;
+            document.getElementById('enableDocumentSummary').checked = data.features?.document_summary === true;
+            
+        } catch (error) {
+            console.error('Failed to load extraction config:', error);
+            showNotification('Failed to load extraction configuration', 'warning');
+        }
+    }
+    
+    async function saveExtractionConfig() {
+        try {
+            const config = {
+                extraction_method: document.getElementById('extractionMethodSelect').value,
+                gpt4_model: document.getElementById('gpt4ModelSelect').value,
+                features: {
+                    text_enhancement: document.getElementById('enableTextEnhancement').checked,
+                    structured_data: document.getElementById('enableStructuredData').checked,
+                    contract_analysis: document.getElementById('enableContractAnalysis').checked,
+                    document_summary: document.getElementById('enableDocumentSummary').checked
+                }
+            };
+            
+            const response = await fetch('/api/extraction/config', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(config)
+            });
+            
+            const result = await response.json();
+            if (response.ok) {
+                showNotification('Extraction configuration saved successfully', 'success');
+            } else {
+                showNotification(`Failed to save extraction config: ${result.error}`, 'error');
+            }
+        } catch (error) {
+            showNotification('Failed to save extraction configuration', 'error');
+        }
+    }
+    
+    // Update extraction method visibility based on selection
+    function updateExtractionUI() {
+        const extractionMethod = document.getElementById('extractionMethodSelect').value;
+        const gpt4Features = document.querySelector('.model-section:nth-child(4)');
+        const gpt4Model = document.querySelector('.model-section:nth-child(5)');
+        const statusSection = document.querySelector('.model-section:nth-child(6)');
+        
+        if (extractionMethod === 'gpt4_enhanced') {
+            gpt4Features.style.display = 'block';
+            gpt4Model.style.display = 'block';
+            statusSection.style.display = 'block';
+        } else {
+            gpt4Features.style.display = 'none';
+            gpt4Model.style.display = 'none';
+            statusSection.style.display = 'none';
+        }
+    }
+    
+    // Load extraction system status
+    async function loadExtractionStatus() {
+        try {
+            const response = await fetch('/api/extraction/status');
+            const data = await response.json();
+            
+            const statusIndicator = document.getElementById('statusIndicator');
+            const statusText = document.getElementById('statusText');
+            const statusDetails = document.getElementById('statusDetails');
+            
+            if (data.gpt4_available) {
+                statusIndicator.style.background = '#10b981'; // Green
+                statusText.textContent = 'GPT-4 Extraction Available';
+                statusDetails.innerHTML = `
+                    <strong>Available Models:</strong> ${data.available_models.join(', ')}<br>
+                    <strong>System Status:</strong> ${data.system_status}<br>
+                    <strong>Current Method:</strong> ${data.current_config.extraction_method}
+                `;
+            } else {
+                statusIndicator.style.background = '#f59e0b'; // Orange
+                statusText.textContent = 'GPT-4 Extraction Limited';
+                statusDetails.innerHTML = `
+                    <strong>Status:</strong> Traditional extraction only<br>
+                    <strong>Reason:</strong> No GPT-4 API keys configured<br>
+                    <strong>Available:</strong> Basic text extraction
+                `;
+            }
+        } catch (error) {
+            const statusIndicator = document.getElementById('statusIndicator');
+            const statusText = document.getElementById('statusText');
+            const statusDetails = document.getElementById('statusDetails');
+            
+            statusIndicator.style.background = '#ef4444'; // Red
+            statusText.textContent = 'Status Check Failed';
+            statusDetails.textContent = 'Unable to check extraction system status';
         }
     }
     async function switchModel(newModel) {
@@ -302,18 +480,89 @@
         try {
             const formData = new FormData();
             formData.append('file', file);
+            
+            // Show initial upload notification
+            showNotification(`📤 Uploading ${file.name}...`, 'info');
+            
             const response = await fetch('/upload', {
                 method: 'POST',
-                body: formData
+                body: formData,
+                signal: AbortSignal.timeout(60000) // 60 second timeout for upload
             });
+            
             if (response.ok) {
-                showNotification(`✅ ${file.name} uploaded successfully`, 'success');
+                const result = await response.json();
+                
+                if (result.processing_id) {
+                    // Start monitoring processing progress
+                    monitorProcessing(result.processing_id, file.name);
+                } else {
+                    // Immediate success (for small files)
+                    showNotification(`✅ ${file.name} uploaded successfully`, 'success');
+                }
             } else {
-                throw new Error(`Failed to upload ${file.name}`);
+                const errorData = await response.json();
+                throw new Error(errorData.error || `Failed to upload ${file.name}`);
             }
         } catch (error) {
-            showNotification(`❌ Failed to upload ${file.name}`, 'error');
+            showNotification(`❌ Failed to upload ${file.name}: ${error.message}`, 'error');
         }
+    }
+    
+    async function monitorProcessing(processingId, filename) {
+        const maxAttempts = 900; // 15 minutes with 1-second intervals
+        let attempts = 0;
+        
+        // Show progress bar
+        const progressDiv = document.getElementById('uploadProgress');
+        const progressBar = document.getElementById('progressBar');
+        const progressText = document.getElementById('progressText');
+        progressDiv.style.display = 'block';
+        
+        const checkStatus = async () => {
+            try {
+                const response = await fetch(`/api/processing/status/${processingId}`, {
+                    signal: AbortSignal.timeout(10000) // 10 second timeout for status checks
+                });
+                
+                if (response.ok) {
+                    const status = await response.json();
+                    
+                    // Update progress bar
+                    progressBar.style.width = `${status.progress}%`;
+                    progressText.textContent = `${status.progress}%`;
+                    
+                    // Update notification with progress
+                    if (status.status === 'processing') {
+                        showNotification(`🔄 ${filename}: ${status.message} (${status.progress}%)`, 'info');
+                        
+                        if (attempts < maxAttempts) {
+                            attempts++;
+                            setTimeout(checkStatus, 1000);
+                        } else {
+                            showNotification(`⏰ ${filename}: Processing timeout`, 'error');
+                            progressDiv.style.display = 'none';
+                        }
+                    } else if (status.status === 'completed') {
+                        showNotification(`✅ ${filename}: ${status.message}`, 'success');
+                        progressDiv.style.display = 'none';
+                        loadDocuments(); // Refresh document list
+                    } else if (status.status === 'error') {
+                        showNotification(`❌ ${filename}: ${status.error}`, 'error');
+                        progressDiv.style.display = 'none';
+                    }
+                } else {
+                    showNotification(`❌ ${filename}: Failed to check processing status`, 'error');
+                    progressDiv.style.display = 'none';
+                }
+            } catch (error) {
+                showNotification(`❌ ${filename}: Error monitoring processing: ${error.message}`, 'error');
+                progressDiv.style.display = 'none';
+            }
+        };
+        
+        // Start monitoring
+        checkStatus();
     }
     async function deleteDocument(filename) {
         if (!confirm(`Delete ${filename}?`)) return;
@@ -387,10 +636,62 @@
     // Instructions button events
     document.getElementById('saveInstructionsBtn').addEventListener('click', saveInstructions);
     document.getElementById('resetInstructionsBtn').addEventListener('click', resetInstructions);
+    
+    // Extraction configuration events
+    document.getElementById('extractionMethodSelect').addEventListener('change', function() {
+        updateExtractionUI();
+        saveExtractionConfig();
+    });
+    
+    document.getElementById('gpt4ModelSelect').addEventListener('change', saveExtractionConfig);
+    
+    // GPT-4 feature checkboxes
+    document.getElementById('enableTextEnhancement').addEventListener('change', saveExtractionConfig);
+    document.getElementById('enableStructuredData').addEventListener('change', saveExtractionConfig);
+    document.getElementById('enableContractAnalysis').addEventListener('change', saveExtractionConfig);
+    document.getElementById('enableDocumentSummary').addEventListener('change', saveExtractionConfig);
+    
+    // Test extraction button
+    document.getElementById('testExtractionBtn').addEventListener('click', async function() {
+        const button = this;
+        const originalText = button.textContent;
+        button.textContent = 'Testing...';
+        button.disabled = true;
+        
+        try {
+            const response = await fetch('/api/extract/test', {
+                method: 'POST'
+            });
+            
+            if (response.ok) {
+                const result = await response.json();
+                showNotification('✅ Extraction test completed successfully', 'success');
+                
+                // Show test results in a simple alert (could be enhanced with a modal)
+                const testResults = Object.keys(result.results).map(key => 
+                    `${key}: ${result.results[key].success ? '✅' : '❌'}`
+                ).join('\n');
+                
+                alert(`Extraction Test Results:\n\n${testResults}`);
+            } else {
+                const error = await response.json();
+                showNotification(`❌ Extraction test failed: ${error.error}`, 'error');
+            }
+        } catch (error) {
+            showNotification('❌ Extraction test failed: Network error', 'error');
+        } finally {
+            button.textContent = originalText;
+            button.disabled = false;
+        }
+    });
+    
     // Initial load
     loadModels();
     loadInstructions();
     loadDocuments();
+    loadExtractionConfig(); // Load extraction config on page load
+    updateExtractionUI(); // Update UI based on initial extraction method
+    loadExtractionStatus(); // Load extraction status on page load
     // Notification
     function showNotification(message, type = 'info') {
         const notification = document.createElement('div');

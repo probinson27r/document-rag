@@ -1267,6 +1267,15 @@ def process_legal_pdf_nemo(pdf_path: str) -> dict:
         # Open the PDF
         doc = fitz.open(pdf_path)
         
+        # Generate unique document identifier
+        import hashlib
+        import time
+        filename = os.path.basename(pdf_path)
+        file_stats = os.stat(pdf_path)
+        doc_hash = hashlib.md5(f"{filename}_{file_stats.st_size}_{file_stats.st_mtime}".encode()).hexdigest()[:8]
+        timestamp = int(time.time())
+        doc_id = f"{filename}_{doc_hash}_{timestamp}"
+        
         # First pass: Extract all text and identify sections across pages
         all_text = ""
         page_sections = []  # Track sections and their page ranges
@@ -1295,13 +1304,16 @@ def process_legal_pdf_nemo(pdf_path: str) -> dict:
             
             for chunk in section_chunks:
                 formatted_chunks.append({
-                    'chunk_id': f"pymupdf_{os.path.basename(pdf_path)}_{chunk_id}",
+                    'chunk_id': f"{doc_id}_chunk_{chunk_id}",
                     'content': chunk['content'],
                     'chunk_type': 'pymupdf',
                     'section_number': chunk['section_number'],
                     'section_title': chunk['section_title'],
                     'pages': chunk['pages'],
-                    'cross_references': []
+                    'cross_references': [],
+                    'document_id': doc_id,
+                    'filename': filename,
+                    'upload_timestamp': timestamp
                 })
                 chunk_id += 1
         
@@ -1320,7 +1332,9 @@ def process_legal_pdf_nemo(pdf_path: str) -> dict:
             'total_chunks': len(final_chunks),
             'extraction_method': 'pymupdf_enhanced',
             'chunks': final_chunks,
-            'summary': summary
+            'summary': summary,
+            'document_id': doc_id,
+            'filename': filename
         }
         
     except Exception as e:

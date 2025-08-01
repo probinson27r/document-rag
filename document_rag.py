@@ -16,6 +16,21 @@ from chromadb.config import Settings
 import pdfplumber
 import re
 from langchain.text_splitter import RecursiveCharacterTextSplitter
+
+# GPT-4 extraction
+try:
+    from gpt4_extraction import GPT4Extractor
+    GPT4_EXTRACTION_AVAILABLE = True
+except ImportError:
+    GPT4_EXTRACTION_AVAILABLE = False
+
+# GPT-4 chunking
+try:
+    from gpt4_chunking import GPT4Chunker
+    GPT4_CHUNKING_AVAILABLE = True
+except ImportError:
+    GPT4_CHUNKING_AVAILABLE = False
+
 # Donut dependencies
 try:
     from transformers import DonutProcessor, VisionEncoderDecoderModel
@@ -38,8 +53,40 @@ import traceback
 class DocumentProcessor:
     """Handles document ingestion and text extraction"""
     
-    def __init__(self):
+    def __init__(self, use_gpt4_enhancement: bool = True, use_gpt4_chunking: bool = True):
         self.supported_formats = ['.pdf', '.docx', '.txt', '.csv', '.json']
+        self.use_gpt4_enhancement = use_gpt4_enhancement and GPT4_EXTRACTION_AVAILABLE
+        self.use_gpt4_chunking = use_gpt4_chunking and GPT4_CHUNKING_AVAILABLE
+        
+        # Initialize GPT-4 extractor if available
+        self.gpt4_extractor = None
+        if self.use_gpt4_enhancement:
+            try:
+                self.gpt4_extractor = GPT4Extractor(
+                    openai_api_key=os.getenv('OPENAI_API_KEY'),
+                    anthropic_api_key=os.getenv('ANTHROPIC_API_KEY'),
+                    private_gpt4_url=os.getenv('PRIVATE_GPT4_URL', 'https://doe-srt-sensai-nprd-apim.azure-api.net/doe-srt-sensai-nprd-oai/openai/deployments/gpt-4o/chat/completions?api-version=2025-03-01-preview'),
+                    private_gpt4_key=os.getenv('PRIVATE_GPT4_API_KEY')
+                )
+                print("[GPT-4] GPT-4 extraction enabled")
+            except Exception as e:
+                print(f"[GPT-4] Failed to initialize GPT-4 extractor: {e}")
+                self.use_gpt4_enhancement = False
+        
+        # Initialize GPT-4 chunker if available
+        self.gpt4_chunker = None
+        if self.use_gpt4_chunking:
+            try:
+                self.gpt4_chunker = GPT4Chunker(
+                    openai_api_key=os.getenv('OPENAI_API_KEY'),
+                    anthropic_api_key=os.getenv('ANTHROPIC_API_KEY'),
+                    private_gpt4_url=os.getenv('PRIVATE_GPT4_URL', 'https://doe-srt-sensai-nprd-apim.azure-api.net/doe-srt-sensai-nprd-oai/openai/deployments/gpt-4o/chat/completions?api-version=2025-03-01-preview'),
+                    private_gpt4_key=os.getenv('PRIVATE_GPT4_API_KEY')
+                )
+                print("[GPT-4] GPT-4 chunking enabled")
+            except Exception as e:
+                print(f"[GPT-4] Failed to initialize GPT-4 chunker: {e}")
+                self.use_gpt4_chunking = False
     
     def join_headings_with_content(self, text: str) -> str:
         """Join headings (short, title-like lines) with their following content."""
@@ -297,11 +344,30 @@ class DocumentProcessor:
             if not text or len(text.strip()) < 10:
                 raise ValueError("Document appears to be empty or contains no extractable text")
             
+            # Enhance text using GPT-4 if available
+            enhanced_data = None
+            if self.use_gpt4_enhancement and self.gpt4_extractor:
+                enhanced_data = self.enhance_text_with_gpt4(text, file_extension, prefer_private_gpt4=True)
+                text = enhanced_data["enhanced_text"]
+                print(f"[GPT-4] Enhanced text length: {len(text)}")
+            
+            # Extract structured data using GPT-4 if available
+            structured_data = None
+            if self.use_gpt4_enhancement and self.gpt4_extractor:
+                # Extract common data types
+                data_types = ["dates", "names", "amounts", "key_terms"]
+                if file_extension == '.pdf':
+                    data_types.extend(["contracts", "references"])
+                
+                structured_data = self.extract_structured_data_with_gpt4(text, data_types, prefer_private_gpt4=True)
+                print(f"[GPT-4] Extracted structured data: {len(structured_data.get('extracted_data', {}))} data types")
+            
             # Generate document metadata
             file_stats = path.stat()
             doc_hash = hashlib.md5(text.encode('utf-8')).hexdigest()
             
-            return {
+            # Build metadata
+            metadata = {
                 'filename': path.name,
                 'filepath': str(path),
                 'file_size': file_stats.st_size,
@@ -313,6 +379,20 @@ class DocumentProcessor:
                 'processed_time': datetime.now().isoformat(),
                 'extraction_method': self._get_extraction_method(file_extension)
             }
+            
+            # Add GPT-4 enhancement metadata
+            if enhanced_data:
+                metadata['gpt4_enhancement'] = {
+                    'quality_score': enhanced_data.get('quality_score', 0.5),
+                    'processing_notes': enhanced_data.get('processing_notes', ''),
+                    'extracted_metadata': enhanced_data.get('metadata', {})
+                }
+            
+            # Add structured data
+            if structured_data:
+                metadata['structured_data'] = structured_data
+            
+            return metadata
             
         except Exception as e:
             # Return error information for debugging
@@ -335,6 +415,133 @@ class DocumentProcessor:
             '.json': 'json module'
         }
         return methods.get(file_extension, 'unknown')
+    
+    def enhance_text_with_gpt4(self, raw_text: str, file_type: str, prefer_private_gpt4: bool = True) -> Dict[str, Any]:
+        """
+        Enhance extracted text using GPT-4
+        
+        Args:
+            raw_text: Raw extracted text
+            file_type: Type of file (.pdf, .docx, etc.)
+            prefer_private_gpt4: Whether to prefer Private GPT-4 over other providers
+            
+        Returns:
+            Dictionary with enhanced text and metadata
+        """
+        if not self.use_gpt4_enhancement or not self.gpt4_extractor:
+            return {
+                "enhanced_text": raw_text,
+                "metadata": {},
+                "quality_score": 0.5,
+                "processing_notes": "GPT-4 enhancement not available"
+            }
+        
+        try:
+            print(f"[GPT-4] Enhancing {file_type} text extraction (prefer_private_gpt4: {prefer_private_gpt4})...")
+            result = self.gpt4_extractor.enhance_text_extraction(raw_text, file_type, prefer_private_gpt4=prefer_private_gpt4)
+            
+            if result.get("success"):
+                enhanced_data = result.get("extracted_data", {})
+                enhanced_text = enhanced_data.get("enhanced_text", raw_text)
+                metadata = enhanced_data.get("metadata", {})
+                quality_score = enhanced_data.get("quality_score", 0.5)
+                
+                print(f"[GPT-4] Text enhancement completed (quality: {quality_score})")
+                return {
+                    "enhanced_text": enhanced_text,
+                    "metadata": metadata,
+                    "quality_score": quality_score,
+                    "processing_notes": "GPT-4 enhanced extraction"
+                }
+            else:
+                print(f"[GPT-4] Enhancement failed: {result.get('error', 'Unknown error')}")
+                return {
+                    "enhanced_text": raw_text,
+                    "metadata": {},
+                    "quality_score": 0.5,
+                    "processing_notes": f"GPT-4 enhancement failed: {result.get('error', 'Unknown error')}"
+                }
+                
+        except Exception as e:
+            print(f"[GPT-4] Enhancement error: {e}")
+            return {
+                "enhanced_text": raw_text,
+                "metadata": {},
+                "quality_score": 0.5,
+                "processing_notes": f"GPT-4 enhancement error: {str(e)}"
+            }
+    
+    def extract_structured_data_with_gpt4(self, text: str, data_types: List[str], prefer_private_gpt4: bool = True) -> Dict[str, Any]:
+        """
+        Extract structured data using GPT-4
+        
+        Args:
+            text: Document text
+            data_types: List of data types to extract
+            prefer_private_gpt4: Whether to prefer Private GPT-4 over other providers
+            
+        Returns:
+            Extracted structured data
+        """
+        if not self.use_gpt4_enhancement or not self.gpt4_extractor:
+            return {
+                "extracted_data": {},
+                "confidence_scores": {},
+                "processing_summary": "GPT-4 extraction not available"
+            }
+        
+        try:
+            print(f"[GPT-4] Extracting structured data: {data_types} (prefer_private_gpt4: {prefer_private_gpt4})")
+            result = self.gpt4_extractor.extract_structured_data(text, data_types, prefer_private_gpt4=prefer_private_gpt4)
+            
+            if result.get("success"):
+                return result.get("extracted_data", {})
+            else:
+                print(f"[GPT-4] Structured data extraction failed: {result.get('error', 'Unknown error')}")
+                return {
+                    "extracted_data": {},
+                    "confidence_scores": {},
+                    "processing_summary": f"GPT-4 extraction failed: {result.get('error', 'Unknown error')}"
+                }
+                
+        except Exception as e:
+            print(f"[GPT-4] Structured data extraction error: {e}")
+            return {
+                "extracted_data": {},
+                "confidence_scores": {},
+                "processing_summary": f"GPT-4 extraction error: {str(e)}"
+            }
+    
+    def chunk_text_with_gpt4(self, text: str, document_type: str = "general", preserve_structure: bool = True, prefer_private_gpt4: bool = True) -> Dict[str, Any]:
+        """
+        Chunk text using GPT-4 intelligent chunking
+        
+        Args:
+            text: Document text to chunk
+            document_type: Type of document (legal, technical, general, etc.)
+            preserve_structure: Whether to preserve document structure
+            prefer_private_gpt4: Whether to prefer Private GPT-4 over other providers
+            
+        Returns:
+            Chunking results with optimized chunks
+        """
+        if not self.use_gpt4_chunking or not self.gpt4_chunker:
+            return {"error": "GPT-4 chunking not available", "chunks": []}
+        
+        try:
+            print(f"[GPT-4] Chunking document with type: {document_type} (prefer_private_gpt4: {prefer_private_gpt4})")
+            result = self.gpt4_chunker.chunk_document_with_gpt4(text, document_type, preserve_structure, prefer_private_gpt4=prefer_private_gpt4)
+            
+            # Optimize chunks for RAG if successful
+            if result.get('success') and result.get('chunks'):
+                print(f"[GPT-4] Optimizing {len(result['chunks'])} chunks for RAG")
+                optimized_chunks = self.gpt4_chunker.optimize_chunks_for_rag(result['chunks'])
+                result['chunks'] = optimized_chunks
+            
+            return result
+        except Exception as e:
+            print(f"[GPT-4] Error in GPT-4 chunking: {e}")
+            return {"error": str(e), "chunks": []}
 
 class OllamaClient:
     def __init__(self, base_url: str = "http://localhost:11434"):  # Should be localhost:11434
@@ -489,10 +696,20 @@ RESPONSE FORMAT:
                 print(f"[DEBUG] Error in doc_data: {doc_data['error']}")
                 sys.stdout.flush()
                 return f"Error processing {doc_data['filename']}: {doc_data['error']}"
-            # Check if document already exists
+            
+            # Generate unique document identifier (consistent with PDF processing)
+            import hashlib
+            import time
+            filename = doc_data['filename']
+            file_stats = os.stat(file_path)
+            doc_hash = hashlib.md5(f"{filename}_{file_stats.st_size}_{file_stats.st_mtime}".encode()).hexdigest()[:8]
+            timestamp = int(time.time())
+            doc_id = f"{filename}_{doc_hash}_{timestamp}"
+            
+            # Check if document already exists (using new document ID system)
             print("[DEBUG] Checking for existing docs...")
             existing_docs = self.collection.get(
-                where={"doc_hash": doc_data['doc_hash']}
+                where={"document_id": doc_id}
             )
             print(f"[DEBUG] existing_docs: {existing_docs}")
             sys.stdout.flush()
@@ -500,20 +717,59 @@ RESPONSE FORMAT:
                 print("[DEBUG] Document already exists in DB")
                 sys.stdout.flush()
                 return f"Document {doc_data['filename']} already exists in the database"
+            
             # Validate text content
             if len(doc_data['text'].strip()) < 50:
                 print("[DEBUG] Insufficient text content")
                 sys.stdout.flush()
                 return f"Document {doc_data['filename']} contains insufficient text content (less than 50 characters)"
-            # Split text into chunks
+            
+            # Split text into chunks using GPT-4 if available, otherwise fallback to traditional chunking
             print("[DEBUG] Splitting text into chunks...")
-            chunks = self.text_splitter.split_text(doc_data['text'])
-            print(f"[DEBUG] Number of chunks: {len(chunks)}")
+            
+            # Try GPT-4 chunking first if available
+            gpt4_chunking_result = None
+            if self.document_processor.use_gpt4_chunking and self.document_processor.gpt4_chunker:
+                try:
+                    print("[DEBUG] Attempting GPT-4 chunking...")
+                    # Determine document type based on file extension
+                    file_ext = os.path.splitext(doc_data['filename'])[1].lower()
+                    document_type = "legal" if file_ext == '.pdf' else "general"
+                    
+                    gpt4_chunking_result = self.document_processor.chunk_text_with_gpt4(
+                        doc_data['text'], 
+                        document_type=document_type, 
+                        preserve_structure=True,
+                        prefer_private_gpt4=True
+                    )
+                    
+                    if gpt4_chunking_result.get('success') and gpt4_chunking_result.get('chunks'):
+                        print(f"[DEBUG] GPT-4 chunking successful: {len(gpt4_chunking_result['chunks'])} chunks")
+                        chunks = [chunk['content'] for chunk in gpt4_chunking_result['chunks']]
+                        chunking_method = "gpt4_intelligent"
+                    else:
+                        print(f"[DEBUG] GPT-4 chunking failed: {gpt4_chunking_result.get('error', 'Unknown error')}")
+                        # Fallback to traditional chunking
+                        chunks = self.text_splitter.split_text(doc_data['text'])
+                        chunking_method = "traditional_fallback"
+                        
+                except Exception as e:
+                    print(f"[DEBUG] GPT-4 chunking error: {e}")
+                    # Fallback to traditional chunking
+                    chunks = self.text_splitter.split_text(doc_data['text'])
+                    chunking_method = "traditional_fallback"
+            else:
+                # Use traditional chunking
+                chunks = self.text_splitter.split_text(doc_data['text'])
+                chunking_method = "traditional"
+            
+            print(f"[DEBUG] Number of chunks: {len(chunks)} (method: {chunking_method})")
             sys.stdout.flush()
             if not chunks:
                 print("[DEBUG] No chunks generated")
                 sys.stdout.flush()
                 return f"Document {doc_data['filename']} could not be split into chunks"
+            
             # Generate embeddings
             try:
                 print("[DEBUG] Generating embeddings...")
@@ -525,8 +781,9 @@ RESPONSE FORMAT:
                 traceback.print_exc()
                 sys.stdout.flush()
                 return f"Error generating embeddings for {doc_data['filename']}: {str(e)}"
-            # Prepare data for ChromaDB
-            ids = [f"{doc_data['doc_hash']}_{i}" for i in range(len(chunks))]
+            
+            # Prepare data for ChromaDB with new document ID system
+            ids = [f"{doc_id}_chunk_{i}" for i in range(len(chunks))]
             metadatas = []
             for i, chunk in enumerate(chunks):
                 metadata = {
@@ -538,9 +795,28 @@ RESPONSE FORMAT:
                     "total_chunks": len(chunks),
                     "text_length": doc_data['text_length'],
                     "extraction_method": doc_data['extraction_method'],
-                    "processed_time": doc_data['processed_time']
+                    "processed_time": doc_data['processed_time'],
+                    "document_id": doc_id,
+                    "upload_timestamp": str(timestamp),
+                    "chunking_method": chunking_method
                 }
+                
+                # Add GPT-4 chunking metadata if available
+                if gpt4_chunking_result and gpt4_chunking_result.get('success') and i < len(gpt4_chunking_result.get('chunks', [])):
+                    gpt4_chunk = gpt4_chunking_result['chunks'][i]
+                    metadata.update({
+                        "gpt4_chunked": True,
+                        "chunk_type": gpt4_chunk.get('chunk_type', 'paragraph'),
+                        "section_number": gpt4_chunk.get('section_number', ''),
+                        "section_title": gpt4_chunk.get('section_title', ''),
+                        "semantic_theme": gpt4_chunk.get('semantic_theme', ''),
+                        "quality_score": gpt4_chunk.get('quality_score', 0.8)
+                    })
+                else:
+                    metadata["gpt4_chunked"] = False
+                
                 metadatas.append(metadata)
+            
             # Add to ChromaDB
             try:
                 print("[DEBUG] Adding to ChromaDB...")
@@ -557,6 +833,7 @@ RESPONSE FORMAT:
                 traceback.print_exc()
                 sys.stdout.flush()
                 return f"Error storing {doc_data['filename']} in database: {str(e)}"
+            
             print("[DEBUG] Successfully ingested document")
             sys.stdout.flush()
             return f"Successfully ingested {doc_data['filename']} with {len(chunks)} chunks ({doc_data['text_length']} characters)"
