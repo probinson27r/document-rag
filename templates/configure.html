@@ -196,6 +196,12 @@
             <div style="font-size: 12px; margin-top: 5px; opacity: 0.7;">
                 PDF, DOCX, TXT, CSV, JSON
             </div>
+            <div id="uploadProgress" style="display: none; margin-top: 10px;">
+                <div style="background: #e5e7eb; border-radius: 4px; height: 6px; overflow: hidden;">
+                    <div id="progressBar" style="background: #3b82f6; height: 100%; width: 0%; transition: width 0.3s ease;"></div>
+                </div>
+                <div id="progressText" style="font-size: 11px; color: #6b7280; margin-top: 4px;">0%</div>
+            </div>
         </div>
         <input type="file" class="file-input" id="fileInput" 
                accept=".pdf,.docx,.txt,.csv,.json" multiple>
@@ -474,18 +480,89 @@
         try {
             const formData = new FormData();
             formData.append('file', file);
+            
+            // Show initial upload notification
+            showNotification(`📤 Uploading ${file.name}...`, 'info');
+            
             const response = await fetch('/upload', {
                 method: 'POST',
-                body: formData
+                body: formData,
+                signal: AbortSignal.timeout(60000) // 60 second timeout for upload
             });
+            
             if (response.ok) {
-                showNotification(`✅ ${file.name} uploaded successfully`, 'success');
+                const result = await response.json();
+                
+                if (result.processing_id) {
+                    // Start monitoring processing progress
+                    monitorProcessing(result.processing_id, file.name);
+                } else {
+                    // Immediate success (for small files)
+                    showNotification(`✅ ${file.name} uploaded successfully`, 'success');
+                }
             } else {
-                throw new Error(`Failed to upload ${file.name}`);
+                const errorData = await response.json();
+                throw new Error(errorData.error || `Failed to upload ${file.name}`);
             }
         } catch (error) {
-            showNotification(`❌ Failed to upload ${file.name}`, 'error');
+            showNotification(`❌ Failed to upload ${file.name}: ${error.message}`, 'error');
         }
+    }
+    
+    async function monitorProcessing(processingId, filename) {
+        const maxAttempts = 900; // 15 minutes with 1-second intervals
+        let attempts = 0;
+        
+        // Show progress bar
+        const progressDiv = document.getElementById('uploadProgress');
+        const progressBar = document.getElementById('progressBar');
+        const progressText = document.getElementById('progressText');
+        progressDiv.style.display = 'block';
+        
+        const checkStatus = async () => {
+            try {
+                const response = await fetch(`/api/processing/status/${processingId}`, {
+                    signal: AbortSignal.timeout(10000) // 10 second timeout for status checks
+                });
+                
+                if (response.ok) {
+                    const status = await response.json();
+                    
+                    // Update progress bar
+                    progressBar.style.width = `${status.progress}%`;
+                    progressText.textContent = `${status.progress}%`;
+                    
+                    // Update notification with progress
+                    if (status.status === 'processing') {
+                        showNotification(`🔄 ${filename}: ${status.message} (${status.progress}%)`, 'info');
+                        
+                        if (attempts < maxAttempts) {
+                            attempts++;
+                            setTimeout(checkStatus, 1000);
+                        } else {
+                            showNotification(`⏰ ${filename}: Processing timeout`, 'error');
+                            progressDiv.style.display = 'none';
+                        }
+                    } else if (status.status === 'completed') {
+                        showNotification(`✅ ${filename}: ${status.message}`, 'success');
+                        progressDiv.style.display = 'none';
+                        loadDocuments(); // Refresh document list
+                    } else if (status.status === 'error') {
+                        showNotification(`❌ ${filename}: ${status.error}`, 'error');
+                        progressDiv.style.display = 'none';
+                    }
+                } else {
+                    showNotification(`❌ ${filename}: Failed to check processing status`, 'error');
+                    progressDiv.style.display = 'none';
+                }
+            } catch (error) {
+                showNotification(`❌ ${filename}: Error monitoring processing: ${error.message}`, 'error');
+                progressDiv.style.display = 'none';
+            }
+        };
+        
+        // Start monitoring
+        checkStatus();
     }
     async function deleteDocument(filename) {
         if (!confirm(`Delete ${filename}?`)) return;

@@ -1,18 +1,33 @@
-from flask import Flask, request, jsonify, render_template, send_from_directory, send_file, after_this_request, session
 import os
 import json
+import logging
+from datetime import datetime
+from flask import Flask, request, jsonify, render_template, session, send_file, after_this_request, send_from_directory
 from werkzeug.utils import secure_filename
-from legal_document_rag import process_legal_pdf_nemo
-from sentence_transformers import SentenceTransformer
 import chromadb
 from chromadb.config import Settings
-import ollama
+from sentence_transformers import SentenceTransformer
 import anthropic
-import logging
 import openai
+import ollama
 import requests
-from datetime import datetime
+import tempfile
+import shutil
 from flask_session import Session
+from legal_document_rag import process_legal_pdf_nemo
+import threading
+import time
+import uuid
+
+# Load environment variables from .env.local
+try:
+    from dotenv import load_dotenv
+    load_dotenv('.env.local')
+    print("Loaded environment variables from .env.local")
+except ImportError:
+    print("python-dotenv not installed, using system environment variables")
+except Exception as e:
+    print(f"Error loading .env.local: {e}")
 
 # Import GPT-4 extraction availability
 try:
@@ -31,11 +46,19 @@ app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-production')
 app.config['SESSION_TYPE'] = 'filesystem'
 
+# Add timeout configurations
+app.config['REQUEST_TIMEOUT'] = 300  # 5 minutes for request timeout
+app.config['UPLOAD_TIMEOUT'] = 600   # 10 minutes for upload processing
+app.config['PROCESSING_TIMEOUT'] = 900  # 15 minutes for document processing
+
 # Initialize Flask-Session
 Session(app)
 
 # Ensure upload directory exists
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+
+# Global processing status tracking
+processing_status = {}
 
 # Initialize components
 embedding_model = None
@@ -46,11 +69,14 @@ claude_client = None
 openai_client = None
 jan_client = None
 private_gpt4_client = None  # New private GPT-4 client
-current_model = 'Private GPT-4'  # Default to Private GPT-4
+current_model = 'OpenAI GPT-4'  # Default to OpenAI GPT-4
 openai_model_name = 'gpt-4o'  # Default OpenAI model name
 jan_model_name = 'gpt-4'  # Default Jan.ai model name
 private_gpt4_model_name = 'gpt-4o'  # Private GPT-4 model name
 private_gpt4_base_url = 'https://doe-srt-sensai-nprd-apim.azure-api.net/doe-srt-sensai-nprd-oai/openai/deployments/gpt-4o/chat/completions?api-version=2025-03-01-preview'
+
+# Get Private GPT-4 URL from environment or use default
+private_gpt4_url = os.getenv('PRIVATE_GPT4_URL', private_gpt4_base_url)
 user_instructions = """You are Ed-AI, an AI assistant with expertise in technology, legal document analysis and ITIL. I aim to be helpful, honest, and direct while maintaining a warm, conversational tone.
 
 General Guidelines:
@@ -63,25 +89,22 @@ General Guidelines:
 - The vendor is LIFT Alliance
 - Always include the document name used in the response and source list
 
-Task-Oriented Behavior:
-- Always focus on actionable outcomes. For every interaction:
-- Understand the specific legal task (document review, drafting, research, etc.)
-- Provide targeted assistance based on the task requirements
-- Deliver practical, implementable solutions
-- Prioritize efficiency while ensuring thoroughness
+RESPONSE FORMATTING REQUIREMENTS:
+- Write in natural, flowing paragraphs rather than rigid bullet points for explanations
+- Use complete sentences that connect ideas smoothly
+- Start directly addressing the user's question without unnecessary pleasantries
+- Use **bold** for key terms, important concepts, or critical warnings
+- Use prose paragraphs for explanations, only use bullet lists when listing concrete items
+- Each paragraph should focus on one main idea with natural transitions
+- Balance formality with accessibility using precise, clear vocabulary
+- Always end responses with 2-4 specific actionable suggestions
 
 Document Analysis:
 - Refer to the contract as the ED19024 contract
 - Respond using ITIL language and terminology
 - Think step-by-step to ensure accuracy
 - Always consider if the request requires a service variation
-- Always consider if there will be an impact to base services
-- Cite specific clauses, sections, and page references when possible
-- Use clear, accessible language while maintaining legal precision
-- Consider the broader context and practical implications
-- Acknowledge limitations and uncertainties openly
-- Structure my responses logically for easy understanding
-- Use rich text formatting (with no Markdown headers like ###)
+- Always consider if there will be an impact to base and core services
 
 Proactive Assistance:
 - Anticipate related needs or questions
@@ -89,21 +112,17 @@ Proactive Assistance:
 - Identify potential issues before they become problems
 - Offer to help with follow-up tasks
 
-Analysis/Information: 
-- Provide the core legal information or assistance requested
-- Use clear section breaks and bullet points for complex information (avoid Markdown formatting)
-- Include relevant legal context
-- Highlight key risks or considerations
-- Always provide reference using section headings, section numbers and page numbers
-
 Conversation Continuity:
 - Reference previous parts of the conversation naturally
 - Build on earlier requests and suggestions
 - Track the user's primary objectives throughout the session
 - Maintain context about their specific legal situation or document type
 
+ACTION_REQUIREMENT = 
+    MANDATORY: Always end responses with "What would you like to do next?" 
+    followed by 2-4 specific, actionable suggestions related to their legal task.
 
-I'm here to help you understand complex legal documents. Let me analyze the provided context and answer your question thoughtfully."""
+I'm here to help you understand ED19024. Let me analyze the provided context and answer your question thoughtfully."""
 
 def initialize_rag_system():
     """Initialize the RAG system with legal document processing"""
@@ -137,7 +156,7 @@ def initialize_rag_system():
         private_gpt4_api_key = os.getenv('PRIVATE_GPT4_API_KEY')
         if private_gpt4_api_key:
             private_gpt4_client = {
-                'base_url': private_gpt4_base_url,
+                'base_url': private_gpt4_url,
                 'api_key': private_gpt4_api_key
             }
             logger.info("Private GPT-4 client initialized")
@@ -165,32 +184,57 @@ def allowed_file(filename):
     ALLOWED_EXTENSIONS = {'pdf', 'docx', 'txt', 'csv', 'json'}
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
-def ingest_legal_document(file_path: str) -> dict:
+def ingest_legal_document(file_path: str, processing_id: str = None) -> dict:
     """Ingest a legal document using NeMo Retriever only"""
     try:
         logger.info(f"Processing legal document: {file_path} using NeMo Retriever")
         
-        # Get extraction configuration
-        extraction_config = session.get('extraction_config', {
-            'extraction_method': 'auto',
-            'gpt4_model': 'gpt-4o',
-            'features': {
-                'text_enhancement': True,
-                'structured_data': True,
-                'contract_analysis': True,
-                'document_summary': False
+        # Update progress if processing_id provided
+        def update_progress(progress, message):
+            if processing_id and processing_id in processing_status:
+                processing_status[processing_id]['progress'] = progress
+                processing_status[processing_id]['message'] = message
+        
+        update_progress(30, "Loading extraction configuration...")
+        
+        # Get extraction configuration (use default if no session context)
+        try:
+            extraction_config = session.get('extraction_config', {
+                'extraction_method': 'auto',
+                'gpt4_model': 'gpt-4o',
+                'features': {
+                    'text_enhancement': True,
+                    'structured_data': True,
+                    'contract_analysis': True,
+                    'document_summary': False
+                }
+            })
+        except RuntimeError:
+            # No request context, use default configuration
+            extraction_config = {
+                'extraction_method': 'auto',
+                'gpt4_model': 'gpt-4o',
+                'features': {
+                    'text_enhancement': True,
+                    'structured_data': True,
+                    'contract_analysis': True,
+                    'document_summary': False
+                }
             }
-        })
         
         # Process document based on extraction method
         extraction_method = extraction_config.get('extraction_method', 'auto')
         
         if extraction_method == 'traditional':
             # Use traditional processing only
+            update_progress(40, "Processing document with traditional method...")
             result = process_legal_pdf_nemo(file_path)
+            update_progress(80, "Traditional processing completed, preparing chunks...")
         elif extraction_method == 'gpt4_enhanced':
             # Use GPT-4 enhanced processing
+            update_progress(40, "Processing document with NeMo Retriever...")
             result = process_legal_pdf_nemo(file_path)
+            update_progress(60, "NeMo processing completed, applying GPT-4 enhancements...")
             
             # Apply GPT-4 enhancements if available
             if GPT4_EXTRACTION_AVAILABLE:
@@ -199,49 +243,33 @@ def ingest_legal_document(file_path: str) -> dict:
                     extractor = GPT4Extractor(
                         openai_api_key=os.getenv('OPENAI_API_KEY'),
                         anthropic_api_key=os.getenv('ANTHROPIC_API_KEY'),
-                        private_gpt4_url=os.getenv('PRIVATE_GPT4_URL'),
+                        private_gpt4_url=private_gpt4_url,
                         private_gpt4_key=os.getenv('PRIVATE_GPT4_API_KEY')
                     )
                     
-                    # Enhance chunks with GPT-4
-                    enhanced_chunks = []
-                    for chunk in result['chunks']:
-                        enhanced_chunk = chunk.copy()
-                        
-                        # Text enhancement
-                        if extraction_config['features'].get('text_enhancement', True):
-                            enhancement_result = extractor.enhance_text_extraction(chunk['content'], '.pdf')
-                            if enhancement_result.get('success'):
-                                enhanced_chunk['content'] = enhancement_result['extracted_data'].get('enhanced_text', chunk['content'])
-                                enhanced_chunk['gpt4_enhancement'] = enhancement_result['extracted_data']
-                        
-                        # Structured data extraction
-                        if extraction_config['features'].get('structured_data', True):
-                            data_types = ['dates', 'names', 'amounts', 'key_terms']
-                            if extraction_config['features'].get('contract_analysis', True):
-                                data_types.extend(['contracts', 'references'])
-                            
-                            structured_result = extractor.extract_structured_data(chunk['content'], data_types)
-                            if structured_result.get('success'):
-                                enhanced_chunk['structured_data'] = structured_result['extracted_data']
-                        
-                        # Contract analysis
-                        if extraction_config['features'].get('contract_analysis', True):
-                            contract_result = extractor.extract_legal_contract_data(chunk['content'])
-                            if contract_result.get('success'):
-                                enhanced_chunk['contract_analysis'] = contract_result['extracted_data']
-                        
-                        enhanced_chunks.append(enhanced_chunk)
+                    # Use batch processing for much faster GPT-4 enhancement
+                    total_chunks = len(result['chunks'])
+                    update_progress(60, f"Enhancing {total_chunks} chunks with GPT-4 batch processing...")
+                    
+                    enhanced_chunks = extractor.batch_enhance_chunks(
+                        result['chunks'], 
+                        features=extraction_config['features'],
+                        prefer_private_gpt4=False  # Use OpenAI GPT-4
+                    )
                     
                     result['chunks'] = enhanced_chunks
                     result['extraction_method'] = 'pymupdf_enhanced_with_gpt4'
+                    update_progress(80, "GPT-4 enhancements completed, preparing chunks...")
                     
                 except Exception as e:
                     logger.warning(f"GPT-4 enhancement failed, using traditional processing: {e}")
                     result['extraction_method'] = 'pymupdf_enhanced_fallback'
+                    update_progress(80, "GPT-4 enhancement failed, using fallback processing...")
         else:  # auto
             # Auto-detect: use GPT-4 if available, otherwise traditional
+            update_progress(40, "Processing document with NeMo Retriever...")
             result = process_legal_pdf_nemo(file_path)
+            update_progress(60, "NeMo processing completed, checking GPT-4 availability...")
             
             # Try GPT-4 enhancement if available
             if GPT4_EXTRACTION_AVAILABLE:
@@ -250,46 +278,73 @@ def ingest_legal_document(file_path: str) -> dict:
                     extractor = GPT4Extractor(
                         openai_api_key=os.getenv('OPENAI_API_KEY'),
                         anthropic_api_key=os.getenv('ANTHROPIC_API_KEY'),
-                        private_gpt4_url=os.getenv('PRIVATE_GPT4_URL'),
+                        private_gpt4_url=private_gpt4_url,
                         private_gpt4_key=os.getenv('PRIVATE_GPT4_API_KEY')
                     )
                     
                     # Quick test to see if GPT-4 is working
-                    test_result = extractor.extract_structured_data("Test", ['dates'])
+                    update_progress(65, "Testing GPT-4 availability...")
+                    test_result = extractor.extract_structured_data("Test document with date 2024-01-15", ['dates'])
                     if test_result.get('success'):
+                        update_progress(70, "GPT-4 available, enhancing document...")
                         # GPT-4 is available, enhance the document
                         enhanced_chunks = []
-                        for chunk in result['chunks']:
-                            enhanced_chunk = chunk.copy()
-                            
-                            # Apply enabled features
-                            if extraction_config['features'].get('text_enhancement', True):
-                                enhancement_result = extractor.enhance_text_extraction(chunk['content'], '.pdf')
-                                if enhancement_result.get('success'):
-                                    enhanced_chunk['content'] = enhancement_result['extracted_data'].get('enhanced_text', chunk['content'])
-                            
-                            if extraction_config['features'].get('structured_data', True):
-                                data_types = ['dates', 'names', 'amounts', 'key_terms']
-                                if extraction_config['features'].get('contract_analysis', True):
-                                    data_types.extend(['contracts', 'references'])
-                                
-                                structured_result = extractor.extract_structured_data(chunk['content'], data_types)
-                                if structured_result.get('success'):
-                                    enhanced_chunk['structured_data'] = structured_result['extracted_data']
-                            
-                            enhanced_chunks.append(enhanced_chunk)
+                        total_chunks = len(result['chunks'])
                         
-                        result['chunks'] = enhanced_chunks
-                        result['extraction_method'] = 'pymupdf_enhanced_with_gpt4_auto'
+                        # Use batch processing for much faster GPT-4 enhancement
+                        import time
+                        start_time = time.time()
+                        max_processing_time = 300  # 5 minutes max for parallel processing
+                        
+                        update_progress(70, f"Enhancing {total_chunks} chunks with GPT-4 batch processing...")
+                        
+                        # Use the new batch processing method with timeout
+                        enhanced_chunks = extractor.batch_enhance_chunks(
+                            result['chunks'], 
+                            features=extraction_config['features'],
+                            prefer_private_gpt4=False  # Use OpenAI GPT-4
+                        )
+                        
+                        # Check if we exceeded the timeout
+                        if time.time() - start_time > max_processing_time:
+                            logger.warning(f"GPT-4 processing timeout after {max_processing_time} seconds, using original chunks")
+                            enhanced_chunks = result['chunks']
+                            result['extraction_method'] = 'pymupdf_enhanced_auto_fallback'
+                        
+                        # Check if batch processing was successful
+                        if len(enhanced_chunks) == total_chunks:
+                            update_progress(85, "GPT-4 batch enhancement completed successfully...")
+                        else:
+                            logger.warning("Batch processing failed, using original chunks")
+                            enhanced_chunks = result['chunks']
+                        
+                        # Check if we had too many failures
+                        failed_chunks = sum(1 for chunk in enhanced_chunks if 'enhanced_text' not in chunk or 'structured_data' not in chunk)
+                        success_rate = (len(enhanced_chunks) - failed_chunks) / len(enhanced_chunks)
+                        
+                        if success_rate < 0.5:  # If less than 50% success rate
+                            update_progress(80, f"GPT-4 success rate too low ({success_rate:.1%}), using traditional processing...")
+                            result['extraction_method'] = 'pymupdf_enhanced_auto_fallback'
+                        else:
+                            result['chunks'] = enhanced_chunks
+                            result['extraction_method'] = 'pymupdf_enhanced_with_gpt4_auto'
+                            update_progress(90, f"GPT-4 enhancements completed ({success_rate:.1%} success rate), preparing chunks...")
+                    else:
+                        logger.warning(f"GPT-4 test failed: {test_result.get('error', 'Unknown error')}")
+                        update_progress(80, "GPT-4 test failed, using traditional processing...")
+                        result['extraction_method'] = 'pymupdf_enhanced_auto_fallback'
                     
                 except Exception as e:
                     logger.info(f"GPT-4 not available for auto mode, using traditional processing: {e}")
                     result['extraction_method'] = 'pymupdf_enhanced_auto_fallback'
+                    update_progress(80, "GPT-4 not available, using traditional processing...")
         
         chunks = result['chunks']
         extraction_method = result['extraction_method']
         document_id = result['document_id']
         filename = result['filename']
+        
+        update_progress(95, f"Preparing {len(chunks)} chunks for database...")
         
         documents = []
         metadatas = []
@@ -332,6 +387,7 @@ def ingest_legal_document(file_path: str) -> dict:
             ids.append(chunk_id)
         
         if documents:
+            update_progress(98, "Generating embeddings and adding to database...")
             embeddings = embedding_model.encode(documents).tolist()
             collection.add(
                 documents=documents,
@@ -340,6 +396,8 @@ def ingest_legal_document(file_path: str) -> dict:
                 ids=ids
             )
             logger.info(f"Added {len(documents)} chunks to ChromaDB for document {filename} (ID: {document_id})")
+
+        update_progress(100, f"Document processing completed successfully! {len(chunks)} chunks created using {extraction_method}.")
 
         return {
             'success': True,
@@ -350,6 +408,9 @@ def ingest_legal_document(file_path: str) -> dict:
         }
     except Exception as e:
         logger.error(f"Error ingesting legal document: {e}")
+        if processing_id and processing_id in processing_status:
+            processing_status[processing_id]['status'] = 'error'
+            processing_status[processing_id]['error'] = f"Processing failed: {str(e)}"
         return {
             'success': False,
             'error': str(e)
@@ -379,59 +440,146 @@ def upload_file():
         return jsonify({'error': 'No file selected'}), 400
     if not allowed_file(file.filename):
         return jsonify({'error': 'Invalid file type. Allowed: PDF, DOCX, TXT, CSV, JSON'}), 400
+    
     try:
         filename = secure_filename(file.filename)
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         file.save(filepath)
         
-        # Choose appropriate ingestion method based on file type
-        file_extension = os.path.splitext(filename)[1].lower()
+        # Generate processing ID for tracking
+        processing_id = str(uuid.uuid4())
         
-        if file_extension == '.pdf':
-            # Use legal document processing for PDFs
-            result = ingest_legal_document(filepath)
-            if result['success']:
-                return jsonify({
-                    'message': f"Document uploaded and processed successfully. {result['total_chunks']} chunks created using {result['extraction_method']}.",
-                    'filename': result['filename'],
-                    'chunks': result['total_chunks'],
-                    'document_id': result.get('document_id', '')
-                })
-            else:
-                return jsonify({'error': f"Failed to process document: {result['error']}"}), 500
-        else:
-            # Use general document processing for other file types
-            from document_rag import DocumentRAG
-            rag = DocumentRAG()
-            result = rag.ingest_document(filepath)
-            
-            if "Successfully ingested" in result:
-                # Extract information from the result string
-                import re
-                chunks_match = re.search(r'(\d+) chunks', result)
-                chunks_count = int(chunks_match.group(1)) if chunks_match else 0
+        # Initialize processing status
+        processing_status[processing_id] = {
+            'status': 'processing',
+            'progress': 0,
+            'message': 'Starting document processing...',
+            'filename': filename,
+            'start_time': time.time(),
+            'result': None,
+            'error': None
+        }
+        
+        # Start async processing
+        def process_document_async():
+            try:
+                processing_status[processing_id]['progress'] = 10
+                processing_status[processing_id]['message'] = 'Document saved, starting processing...'
                 
-                # Generate document ID for non-PDF files (consistent with the ingest_document method)
-                import hashlib
-                import time
-                file_stats = os.stat(filepath)
-                doc_hash = hashlib.md5(f"{filename}_{file_stats.st_size}_{file_stats.st_mtime}".encode()).hexdigest()[:8]
-                timestamp = int(time.time())
-                doc_id = f"{filename}_{doc_hash}_{timestamp}"
+                # Choose appropriate ingestion method based on file type
+                file_extension = os.path.splitext(filename)[1].lower()
                 
-                return jsonify({
-                    'message': f"Document uploaded and processed successfully. {chunks_count} chunks created using general processing.",
-                    'filename': filename,
-                    'chunks': chunks_count,
-                    'document_id': doc_id
-                })
-            else:
-                return jsonify({'error': f"Failed to process document: {result}"}), 500
+                if file_extension == '.pdf':
+                    processing_status[processing_id]['progress'] = 20
+                    processing_status[processing_id]['message'] = 'Processing PDF with legal document analyzer...'
+                    
+                    # Use legal document processing for PDFs
+                    result = ingest_legal_document(filepath, processing_id)
+                    
+                    if result['success']:
+                        processing_status[processing_id]['progress'] = 100
+                        processing_status[processing_id]['message'] = f"Document processed successfully. {result['total_chunks']} chunks created using {result['extraction_method']}."
+                        processing_status[processing_id]['status'] = 'completed'
+                        processing_status[processing_id]['result'] = {
+                            'message': f"Document uploaded and processed successfully. {result['total_chunks']} chunks created using {result['extraction_method']}.",
+                            'filename': result['filename'],
+                            'chunks': result['total_chunks'],
+                            'document_id': result.get('document_id', '')
+                        }
+                    else:
+                        processing_status[processing_id]['status'] = 'error'
+                        processing_status[processing_id]['error'] = f"Failed to process document: {result['error']}"
+                else:
+                    processing_status[processing_id]['progress'] = 20
+                    processing_status[processing_id]['message'] = 'Processing document with general analyzer...'
+                    
+                    # Use general document processing for other file types
+                    from document_rag import DocumentRAG
+                    rag = DocumentRAG()
+                    result = rag.ingest_document(filepath)
+                    
+                    if "Successfully ingested" in result:
+                        # Extract information from the result string
+                        import re
+                        chunks_match = re.search(r'(\d+) chunks', result)
+                        chunks_count = int(chunks_match.group(1)) if chunks_match else 0
+                        
+                        # Generate document ID for non-PDF files (consistent with the ingest_document method)
+                        import hashlib
+                        file_stats = os.stat(filepath)
+                        doc_hash = hashlib.md5(f"{filename}_{file_stats.st_size}_{file_stats.st_mtime}".encode()).hexdigest()[:8]
+                        timestamp = int(time.time())
+                        doc_id = f"{filename}_{doc_hash}_{timestamp}"
+                        
+                        processing_status[processing_id]['progress'] = 100
+                        processing_status[processing_id]['message'] = f"Document processed successfully. {chunks_count} chunks created using general processing."
+                        processing_status[processing_id]['status'] = 'completed'
+                        processing_status[processing_id]['result'] = {
+                            'message': f"Document uploaded and processed successfully. {chunks_count} chunks created using general processing.",
+                            'filename': filename,
+                            'chunks': chunks_count,
+                            'document_id': doc_id
+                        }
+                    else:
+                        processing_status[processing_id]['status'] = 'error'
+                        processing_status[processing_id]['error'] = f"Failed to process document: {result}"
+                        
+            except Exception as e:
+                processing_status[processing_id]['status'] = 'error'
+                processing_status[processing_id]['error'] = f'Processing failed: {str(e)}'
+                traceback.print_exc()
+                sys.stdout.flush()
+        
+        # Start processing in background thread
+        thread = threading.Thread(target=process_document_async)
+        thread.daemon = True
+        thread.start()
+        
+        # Return processing ID immediately
+        return jsonify({
+            'processing_id': processing_id,
+            'message': 'Document upload started. Processing in background...',
+            'status': 'processing'
+        })
                 
     except Exception as e:
         traceback.print_exc()
         sys.stdout.flush()
         return jsonify({'error': f'Upload failed: {str(e)}'}), 500
+
+@app.route('/api/processing/status/<processing_id>', methods=['GET'])
+def get_processing_status(processing_id):
+    """Get the status of document processing"""
+    if processing_id not in processing_status:
+        return jsonify({'error': 'Processing ID not found'}), 404
+    
+    status = processing_status[processing_id]
+    
+    # Clean up completed/error statuses after 1 hour
+    if status['status'] in ['completed', 'error']:
+        if time.time() - status['start_time'] > 3600:  # 1 hour
+            del processing_status[processing_id]
+            return jsonify({'error': 'Processing status expired'}), 404
+    
+    return jsonify(status)
+
+@app.route('/api/processing/cleanup', methods=['POST'])
+def cleanup_processing_status():
+    """Clean up old processing status entries"""
+    current_time = time.time()
+    expired_ids = []
+    
+    for processing_id, status in processing_status.items():
+        if current_time - status['start_time'] > 3600:  # 1 hour
+            expired_ids.append(processing_id)
+    
+    for processing_id in expired_ids:
+        del processing_status[processing_id]
+    
+    return jsonify({
+        'message': f'Cleaned up {len(expired_ids)} expired processing status entries',
+        'cleaned_count': len(expired_ids)
+    })
 
 @app.route('/query', methods=['POST'])
 def query():
@@ -1150,7 +1298,7 @@ def api_gpt4_extraction():
         extractor = GPT4Extractor(
             openai_api_key=os.getenv('OPENAI_API_KEY'),
             anthropic_api_key=os.getenv('ANTHROPIC_API_KEY'),
-            private_gpt4_url=os.getenv('PRIVATE_GPT4_URL'),
+            private_gpt4_url=private_gpt4_url,
             private_gpt4_key=os.getenv('PRIVATE_GPT4_API_KEY')
         )
         
@@ -1207,7 +1355,7 @@ def api_test_gpt4_extraction():
         extractor = GPT4Extractor(
             openai_api_key=os.getenv('OPENAI_API_KEY'),
             anthropic_api_key=os.getenv('ANTHROPIC_API_KEY'),
-            private_gpt4_url=os.getenv('PRIVATE_GPT4_URL'),
+            private_gpt4_url=private_gpt4_url,
             private_gpt4_key=os.getenv('PRIVATE_GPT4_API_KEY')
         )
         
@@ -1244,11 +1392,19 @@ def api_get_extraction_config():
         config = {
             'extraction_method': 'auto',  # auto, gpt4_enhanced, traditional
             'gpt4_model': 'gpt-4o',
+            'prefer_private_gpt4': True,  # Prefer Private GPT-4 over other providers
             'features': {
                 'text_enhancement': True,
                 'structured_data': True,
                 'contract_analysis': True,
-                'document_summary': False
+                'document_summary': False,
+                'gpt4_chunking': True  # Enable GPT-4 chunking
+            },
+            'chunking': {
+                'method': 'auto',  # auto, gpt4, traditional
+                'document_type': 'auto',  # auto, legal, technical, general
+                'preserve_structure': True,
+                'prefer_private_gpt4': True  # Prefer Private GPT-4 for chunking
             }
         }
         
@@ -1283,11 +1439,19 @@ def api_save_extraction_config():
         session['extraction_config'] = {
             'extraction_method': data.get('extraction_method', 'auto'),
             'gpt4_model': data.get('gpt4_model', 'gpt-4o'),
+            'prefer_private_gpt4': data.get('prefer_private_gpt4', True),
             'features': {
                 'text_enhancement': data.get('features', {}).get('text_enhancement', True),
                 'structured_data': data.get('features', {}).get('structured_data', True),
                 'contract_analysis': data.get('features', {}).get('contract_analysis', True),
-                'document_summary': data.get('features', {}).get('document_summary', False)
+                'document_summary': data.get('features', {}).get('document_summary', False),
+                'gpt4_chunking': data.get('features', {}).get('gpt4_chunking', True)
+            },
+            'chunking': {
+                'method': data.get('chunking', {}).get('method', 'auto'),
+                'document_type': data.get('chunking', {}).get('document_type', 'auto'),
+                'preserve_structure': data.get('chunking', {}).get('preserve_structure', True),
+                'prefer_private_gpt4': data.get('chunking', {}).get('prefer_private_gpt4', True)
             }
         }
         
@@ -1307,10 +1471,16 @@ def api_save_extraction_config():
 def api_extraction_status():
     """Get extraction system status and capabilities"""
     try:
-        # Check GPT-4 availability
+        # Check GPT-4 availability (prioritize Private GPT-4)
         gpt4_available = False
         available_models = []
         
+        # Check Private GPT-4 first (preferred)
+        if private_gpt4_url and os.getenv('PRIVATE_GPT4_API_KEY'):
+            gpt4_available = True
+            available_models.append('private-gpt-4')
+        
+        # Check other providers as fallbacks
         if os.getenv('OPENAI_API_KEY'):
             gpt4_available = True
             available_models.append('gpt-4o')
@@ -1320,10 +1490,6 @@ def api_extraction_status():
             gpt4_available = True
             available_models.append('claude-3-5-sonnet-20241022')
         
-        if os.getenv('PRIVATE_GPT4_URL') and os.getenv('PRIVATE_GPT4_API_KEY'):
-            gpt4_available = True
-            available_models.append('private-gpt-4')
-        
         # Get current configuration
         config = session.get('extraction_config', {
             'extraction_method': 'auto',
@@ -1332,7 +1498,13 @@ def api_extraction_status():
                 'text_enhancement': True,
                 'structured_data': True,
                 'contract_analysis': True,
-                'document_summary': False
+                'document_summary': False,
+                'gpt4_chunking': True
+            },
+            'chunking': {
+                'method': 'auto',
+                'document_type': 'auto',
+                'preserve_structure': True
             }
         })
         
@@ -1372,7 +1544,11 @@ if __name__ == '__main__':
     # Initialize the RAG system
     if initialize_rag_system():
         print("✅ Legal Document RAG system initialized successfully")
-        app.run(debug=True, host='0.0.0.0', port=5001)
+        print(f"📊 Timeout configurations:")
+        print(f"   Request timeout: {app.config['REQUEST_TIMEOUT']} seconds")
+        print(f"   Upload timeout: {app.config['UPLOAD_TIMEOUT']} seconds")
+        print(f"   Processing timeout: {app.config['PROCESSING_TIMEOUT']} seconds")
+        app.run(debug=True, host='0.0.0.0', port=5001, threaded=True)
     else:
         print("❌ Failed to initialize Legal Document RAG system")
         exit(1)
