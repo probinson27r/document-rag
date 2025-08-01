@@ -72,7 +72,7 @@ class GPT4Extractor:
                          extraction_prompt: str,
                          model: str = "gpt-4o",
                          max_tokens: int = 4000,
-                         prefer_private_gpt4: bool = False) -> Dict[str, Any]:
+                         prefer_private_gpt4: bool = True) -> Dict[str, Any]:
         """
         Extract structured data from text using GPT-4
         
@@ -234,7 +234,7 @@ class GPT4Extractor:
         logger.debug("No JSON formatting detected, using original response")
         return response.strip()
     
-    def enhance_text_extraction(self, raw_text: str, file_type: str, prefer_private_gpt4: bool = False) -> Dict[str, Any]:
+    def enhance_text_extraction(self, raw_text: str, file_type: str, prefer_private_gpt4: bool = True) -> Dict[str, Any]:
         """
         Enhance text extraction using GPT-4
         
@@ -278,7 +278,7 @@ class GPT4Extractor:
         
         return self.extract_with_gpt4(raw_text, prompt, "gpt-4o", prefer_private_gpt4=prefer_private_gpt4)
     
-    def extract_structured_data(self, text: str, data_types: List[str], prefer_private_gpt4: bool = False) -> Dict[str, Any]:
+    def extract_structured_data(self, text: str, data_types: List[str], prefer_private_gpt4: bool = True) -> Dict[str, Any]:
         """
         Extract specific types of structured data from text
         
@@ -334,7 +334,7 @@ class GPT4Extractor:
         
         return self.extract_with_gpt4(text, prompt, "gpt-4o", prefer_private_gpt4=prefer_private_gpt4)
     
-    def generate_document_summary(self, text: str, summary_type: str = "comprehensive", prefer_private_gpt4: bool = False) -> Dict[str, Any]:
+    def generate_document_summary(self, text: str, summary_type: str = "comprehensive", prefer_private_gpt4: bool = True) -> Dict[str, Any]:
         """
         Generate document summary using GPT-4
         
@@ -369,7 +369,7 @@ class GPT4Extractor:
         
         return self.extract_with_gpt4(text, prompt, "gpt-4o", prefer_private_gpt4=prefer_private_gpt4)
     
-    def extract_legal_contract_data(self, text: str, prefer_private_gpt4: bool = False) -> Dict[str, Any]:
+    def extract_legal_contract_data(self, text: str, prefer_private_gpt4: bool = True) -> Dict[str, Any]:
         """
         Extract legal contract information using GPT-4
         
@@ -412,7 +412,7 @@ class GPT4Extractor:
         
         return self.extract_with_gpt4(text, prompt, "gpt-4o", prefer_private_gpt4=prefer_private_gpt4)
     
-    def clean_and_format_text(self, text: str, preserve_structure: bool = True, prefer_private_gpt4: bool = False) -> Dict[str, Any]:
+    def clean_and_format_text(self, text: str, preserve_structure: bool = True, prefer_private_gpt4: bool = True) -> Dict[str, Any]:
         """
         Clean and format extracted text using GPT-4
         
@@ -449,7 +449,7 @@ class GPT4Extractor:
         
         return self.extract_with_gpt4(text, prompt, "gpt-4o", prefer_private_gpt4=prefer_private_gpt4)
 
-    def batch_enhance_chunks(self, chunks: List[Dict[str, Any]], features: Dict[str, bool] = None, prefer_private_gpt4: bool = False) -> List[Dict[str, Any]]:
+    def batch_enhance_chunks(self, chunks: List[Dict[str, Any]], features: Dict[str, bool] = None, prefer_private_gpt4: bool = True) -> List[Dict[str, Any]]:
         """
         Enhance multiple chunks using parallel processing and large batches for maximum efficiency
         

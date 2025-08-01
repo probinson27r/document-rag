@@ -9,7 +9,8 @@ import time
 from dotenv import load_dotenv
 
 # Load environment variables
-load_dotenv('.env.local')
+import os
+load_dotenv(os.path.join(os.path.dirname(__file__), '..', '.env.local'))
 
 def test_parallel_processing():
     """Test parallel processing implementation"""
@@ -55,8 +56,7 @@ def test_parallel_processing():
         
         enhanced_chunks = extractor.batch_enhance_chunks(
             test_chunks, 
-            features=features,
-            prefer_private_gpt4=False
+            features=features
         )
         
         end_time = time.time()

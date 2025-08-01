@@ -69,7 +69,7 @@ claude_client = None
 openai_client = None
 jan_client = None
 private_gpt4_client = None  # New private GPT-4 client
-current_model = 'OpenAI GPT-4'  # Default to OpenAI GPT-4
+current_model = 'Private GPT-4'  # Default to Private GPT-4
 openai_model_name = 'gpt-4o'  # Default OpenAI model name
 jan_model_name = 'gpt-4'  # Default Jan.ai model name
 private_gpt4_model_name = 'gpt-4o'  # Private GPT-4 model name
@@ -254,7 +254,7 @@ def ingest_legal_document(file_path: str, processing_id: str = None) -> dict:
                     enhanced_chunks = extractor.batch_enhance_chunks(
                         result['chunks'], 
                         features=extraction_config['features'],
-                        prefer_private_gpt4=False  # Use OpenAI GPT-4
+                        prefer_private_gpt4=True  # Use Private GPT-4
                     )
                     
                     result['chunks'] = enhanced_chunks
@@ -302,7 +302,7 @@ def ingest_legal_document(file_path: str, processing_id: str = None) -> dict:
                         enhanced_chunks = extractor.batch_enhance_chunks(
                             result['chunks'], 
                             features=extraction_config['features'],
-                            prefer_private_gpt4=False  # Use OpenAI GPT-4
+                            prefer_private_gpt4=True  # Use Private GPT-4
                         )
                         
                         # Check if we exceeded the timeout

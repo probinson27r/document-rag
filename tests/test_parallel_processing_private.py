@@ -9,12 +9,13 @@ import time
 from dotenv import load_dotenv
 
 # Load environment variables
-load_dotenv('.env.local')
+import os
+load_dotenv(os.path.join(os.path.dirname(__file__), '..', '.env.local'))
 
 def test_parallel_processing_private():
     """Test parallel processing implementation with Private GPT-4"""
     
-    print("🧪 Testing Parallel Processing Implementation (OpenAI GPT-4)")
+    print("🧪 Testing Parallel Processing Implementation (Private GPT-4)")
     print("=" * 60)
     
     try:
@@ -51,13 +52,13 @@ def test_parallel_processing_private():
             'contract_analysis': True
         }
         
-        print("🔄 Running parallel batch enhancement with OpenAI GPT-4...")
+        print("🔄 Running parallel batch enhancement with Private GPT-4...")
         start_time = time.time()
         
         enhanced_chunks = extractor.batch_enhance_chunks(
             test_chunks, 
             features=features,
-            prefer_private_gpt4=False  # Use OpenAI GPT-4
+            prefer_private_gpt4=True  # Use Private GPT-4
         )
         
         end_time = time.time()
@@ -89,7 +90,7 @@ def test_parallel_processing_private():
         return False
 
 if __name__ == "__main__":
-    print("🚀 Starting Parallel Processing Test (OpenAI GPT-4)")
+    print("🚀 Starting Parallel Processing Test (Private GPT-4)")
     print("=" * 70)
     
     success = test_parallel_processing_private()
@@ -102,6 +103,6 @@ if __name__ == "__main__":
         print("\n🎉 Parallel processing is working!")
         print("✅ All chunks are being processed with GPT-4!")
         print("✅ Much faster processing with parallel execution!")
-        print("✅ OpenAI GPT-4 is working correctly!")
+        print("✅ Private GPT-4 is working correctly!")
     else:
         print("\n⚠️  Parallel processing has issues.") 
