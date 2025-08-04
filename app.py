@@ -50,6 +50,7 @@ app.config['SESSION_TYPE'] = 'filesystem'
 app.config['REQUEST_TIMEOUT'] = 300  # 5 minutes for request timeout
 app.config['UPLOAD_TIMEOUT'] = 600   # 10 minutes for upload processing
 app.config['PROCESSING_TIMEOUT'] = 900  # 15 minutes for document processing
+app.config['RESPONSE_SIZE_LIMIT'] = 50 * 1024 * 1024  # 50MB max response size
 
 # Initialize Flask-Session
 Session(app)
@@ -628,7 +629,7 @@ Let me help you understand this:"""
             
             response = claude_client.messages.create(
                 model="claude-3-5-sonnet-20241022",
-                max_tokens=4000,
+                max_tokens=8000,
                 messages=[{"role": "user", "content": prompt}]
             )
             answer = response.content[0].text
@@ -640,7 +641,7 @@ Let me help you understand this:"""
                 model=openai_model_name,
                 messages=[{"role": "system", "content": user_instructions},
                          {"role": "user", "content": f"Context from the legal document:\n{context}\n\nYour question: {question}\nLet me help you understand this:"}],
-                max_tokens=1000
+                max_tokens=4000
             )
             answer = completion.choices[0].message.content
             
@@ -657,7 +658,7 @@ Let me help you understand this:"""
                     {"role": "system", "content": user_instructions},
                     {"role": "user", "content": f"Context from the legal document:\n{context}\n\nYour question: {question}\nLet me help you understand this:"}
                 ],
-                'max_tokens': 1000,
+                'max_tokens': 4000,
                 'temperature': 0.7
             }
             
@@ -665,7 +666,7 @@ Let me help you understand this:"""
                 f'{jan_client["base_url"]}/v1/chat/completions',
                 headers=headers,
                 json=payload,
-                timeout=30
+                timeout=120
             )
             
             if response.status_code == 200:
@@ -687,7 +688,7 @@ Let me help you understand this:"""
                     {"role": "system", "content": user_instructions},
                     {"role": "user", "content": f"Context from the legal document:\n{context}\n\nYour question: {question}\nLet me help you understand this:"}
                 ],
-                'max_tokens': 1000,
+                'max_tokens': 4000,
                 'temperature': 0.7
             }
             
@@ -695,7 +696,7 @@ Let me help you understand this:"""
                 private_gpt4_client['base_url'],
                 headers=headers,
                 json=payload,
-                timeout=30
+                timeout=120
             )
             
             if response.status_code == 200:
