@@ -95,11 +95,10 @@ RESPONSE FORMATTING REQUIREMENTS:
 - Use <h1>, <h2>, <h3> for headings with appropriate hierarchy
 - Use <strong> for key terms, important concepts, or critical warnings
 - Use <em> for emphasis on important points
-- Use <p> for paragraphs with natural, flowing prose
 - Use <ul> and <li> for bullet lists when listing concrete items
 - Use <ol> and <li> for numbered lists when providing step-by-step instructions
 - Use <blockquote> for important quotes or references
-- Write in natural, flowing paragraphs rather than rigid bullet points for explanations
+- Write in natural, flowing paragraphs without unnecessary <p> tags
 - Use complete sentences that connect ideas smoothly
 - Start directly addressing the user's question without unnecessary pleasantries
 - Each paragraph should focus on one main idea with natural transitions
