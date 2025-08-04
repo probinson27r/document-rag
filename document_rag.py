@@ -633,6 +633,15 @@ CORE INSTRUCTIONS:
 - Maintain a professional and helpful tone
 
 RESPONSE FORMAT:
+- DO NOT use markdown formatting (no **, *, #, -, etc.)
+- Generate rich text with proper HTML formatting
+- Use <h1>, <h2>, <h3> for headings with appropriate hierarchy
+- Use <strong> for key terms, important concepts, or critical warnings
+- Use <em> for emphasis on important points
+- Use <p> for paragraphs with natural, flowing prose
+- Use <ul> and <li> for bullet lists when listing concrete items
+- Use <ol> and <li> for numbered lists when providing step-by-step instructions
+- Use <blockquote> for important quotes or references
 - Provide direct answers based on the document content
 - Include specific details and examples when available
 - If multiple documents contain relevant information, synthesize them coherently
@@ -663,6 +672,15 @@ CORE INSTRUCTIONS:
 - Maintain a professional and helpful tone
 
 RESPONSE FORMAT:
+- DO NOT use markdown formatting (no **, *, #, -, etc.)
+- Generate rich text with proper HTML formatting
+- Use <h1>, <h2>, <h3> for headings with appropriate hierarchy
+- Use <strong> for key terms, important concepts, or critical warnings
+- Use <em> for emphasis on important points
+- Use <p> for paragraphs with natural, flowing prose
+- Use <ul> and <li> for bullet lists when listing concrete items
+- Use <ol> and <li> for numbered lists when providing step-by-step instructions
+- Use <blockquote> for important quotes or references
 - Provide direct answers based on the document content
 - Include specific details and examples when available
 - If multiple documents contain relevant information, synthesize them coherently

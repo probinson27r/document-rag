@@ -198,6 +198,89 @@
         .contract-viewer-label {
             color: #1f2937; font-size: 15px; font-weight: 600; margin-bottom: 6px; margin-top: 10px;
         }
+        
+        /* Rich Text Formatting Styles */
+        .message-text h1 {
+            font-size: 1.8em; font-weight: 700; color: #1f2937; margin: 20px 0 15px 0; 
+            border-bottom: 2px solid #667eea; padding-bottom: 8px;
+        }
+        
+        .message-text h2 {
+            font-size: 1.5em; font-weight: 600; color: #1f2937; margin: 18px 0 12px 0;
+            border-bottom: 1px solid #e5e7eb; padding-bottom: 6px;
+        }
+        
+        .message-text h3 {
+            font-size: 1.3em; font-weight: 600; color: #374151; margin: 15px 0 10px 0;
+        }
+        
+        .message-text h4 {
+            font-size: 1.1em; font-weight: 600; color: #4b5563; margin: 12px 0 8px 0;
+        }
+        
+        .message-text p {
+            margin: 12px 0; line-height: 1.6; color: #374151;
+        }
+        
+        .message-text strong {
+            font-weight: 700; color: #1f2937;
+        }
+        
+        .message-text em {
+            font-style: italic; color: #6b7280;
+        }
+        
+        .message-text ul, .message-text ol {
+            margin: 12px 0; padding-left: 20px;
+        }
+        
+        .message-text li {
+            margin: 6px 0; line-height: 1.5; color: #374151;
+        }
+        
+        .message-text ul li {
+            list-style-type: disc;
+        }
+        
+        .message-text ol li {
+            list-style-type: decimal;
+        }
+        
+        .message-text blockquote {
+            margin: 15px 0; padding: 12px 16px; background: rgba(102, 126, 234, 0.1);
+            border-left: 4px solid #667eea; border-radius: 0 6px 6px 0;
+            font-style: italic; color: #4b5563;
+        }
+        
+        /* User message specific styles */
+        .message.user .message-text h1,
+        .message.user .message-text h2,
+        .message.user .message-text h3,
+        .message.user .message-text h4 {
+            color: white;
+        }
+        
+        .message.user .message-text p {
+            color: rgba(255, 255, 255, 0.9);
+        }
+        
+        .message.user .message-text strong {
+            color: white;
+        }
+        
+        .message.user .message-text em {
+            color: rgba(255, 255, 255, 0.8);
+        }
+        
+        .message.user .message-text li {
+            color: rgba(255, 255, 255, 0.9);
+        }
+        
+        .message.user .message-text blockquote {
+            background: rgba(255, 255, 255, 0.2);
+            border-left-color: white;
+            color: rgba(255, 255, 255, 0.9);
+        }
         .contract-viewer {
             width: 100%;
             height: 600px;
@@ -832,10 +915,44 @@
         }
 
         function formatMessage(content) {
-            return escapeHtml(content)
-                .replace(/\n/g, '<br>')
+            // First, escape HTML to prevent XSS, but preserve allowed tags
+            let formattedContent = escapeHtml(content);
+            
+            // Convert line breaks to <br> tags
+            formattedContent = formattedContent.replace(/\n/g, '<br>');
+            
+            // Handle markdown-style formatting as fallback (in case AI still uses it)
+            formattedContent = formattedContent
                 .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
                 .replace(/\*(.*?)\*/g, '<em>$1</em>');
+            
+            // Now safely allow specific HTML tags that the AI should use
+            // This allows the AI to use proper HTML formatting while preventing XSS
+            formattedContent = formattedContent
+                .replace(/&lt;h1&gt;/g, '<h1>')
+                .replace(/&lt;\/h1&gt;/g, '</h1>')
+                .replace(/&lt;h2&gt;/g, '<h2>')
+                .replace(/&lt;\/h2&gt;/g, '</h2>')
+                .replace(/&lt;h3&gt;/g, '<h3>')
+                .replace(/&lt;\/h3&gt;/g, '</h3>')
+                .replace(/&lt;h4&gt;/g, '<h4>')
+                .replace(/&lt;\/h4&gt;/g, '</h4>')
+                .replace(/&lt;strong&gt;/g, '<strong>')
+                .replace(/&lt;\/strong&gt;/g, '</strong>')
+                .replace(/&lt;em&gt;/g, '<em>')
+                .replace(/&lt;\/em&gt;/g, '</em>')
+                .replace(/&lt;p&gt;/g, '<p>')
+                .replace(/&lt;\/p&gt;/g, '</p>')
+                .replace(/&lt;ul&gt;/g, '<ul>')
+                .replace(/&lt;\/ul&gt;/g, '</ul>')
+                .replace(/&lt;ol&gt;/g, '<ol>')
+                .replace(/&lt;\/ol&gt;/g, '</ol>')
+                .replace(/&lt;li&gt;/g, '<li>')
+                .replace(/&lt;\/li&gt;/g, '</li>')
+                .replace(/&lt;blockquote&gt;/g, '<blockquote>')
+                .replace(/&lt;\/blockquote&gt;/g, '</blockquote>');
+            
+            return formattedContent;
         }
 
         function showTyping() {
