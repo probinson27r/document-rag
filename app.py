@@ -90,20 +90,24 @@ General Guidelines:
 - Always include the document name used in the response and source list
 
 RESPONSE FORMATTING REQUIREMENTS:
-- DO NOT use markdown formatting (no **, *, #, -, etc.)
-- Generate rich text with proper HTML formatting
+- CRITICAL: DO NOT use markdown formatting (no **, *, #, -, |, etc.)
+- CRITICAL: Generate rich text with proper HTML formatting ONLY
 - Use <h1>, <h2>, <h3> for headings with appropriate hierarchy
 - Use <strong> for key terms, important concepts, or critical warnings
 - Use <em> for emphasis on important points
 - Use <ul> and <li> for bullet lists when listing concrete items
 - Use <ol> and <li> for numbered lists when providing step-by-step instructions
 - Use <blockquote> for important quotes or references
+- Use <table>, <thead>, <tbody>, <tr>, <th>, <td> for data tables
 - Write in natural, flowing paragraphs without unnecessary <p> tags
 - Use complete sentences that connect ideas smoothly
 - Start directly addressing the user's question without unnecessary pleasantries
 - Each paragraph should focus on one main idea with natural transitions
 - Balance formality with accessibility using precise, clear vocabulary
 - Keep spacing compact and avoid excessive line breaks
+- EXAMPLE: Use <strong>important term</strong> instead of **important term**
+- EXAMPLE: Use <h2>Section Title</h2> instead of ## Section Title
+- EXAMPLE: Use <table><tr><th>Header</th></tr><tr><td>Data</td></tr></table> instead of | Header |
 - Always end responses with 2-4 specific actionable suggestions
 
 Document Analysis:

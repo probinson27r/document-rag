@@ -248,6 +248,26 @@
             font-style: italic; color: #4b5563;
         }
         
+        .message-text table {
+            width: 100%; border-collapse: collapse; margin: 8px 0;
+            background: white; border-radius: 6px; overflow: hidden;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        }
+        
+        .message-text th {
+            background: #f8fafc; padding: 8px 12px; text-align: left;
+            font-weight: 600; color: #374151; border-bottom: 2px solid #e5e7eb;
+        }
+        
+        .message-text td {
+            padding: 8px 12px; border-bottom: 1px solid #f3f4f6;
+            color: #374151;
+        }
+        
+        .message-text tr:hover {
+            background: #f9fafb;
+        }
+        
         /* User message specific styles */
         .message.user .message-text h1,
         .message.user .message-text h2,
@@ -274,6 +294,26 @@
             background: rgba(255, 255, 255, 0.2);
             border-left-color: white;
             color: rgba(255, 255, 255, 0.9);
+        }
+        
+        .message.user .message-text table {
+            background: rgba(255, 255, 255, 0.1);
+            box-shadow: 0 1px 3px rgba(255, 255, 255, 0.2);
+        }
+        
+        .message.user .message-text th {
+            background: rgba(255, 255, 255, 0.2);
+            color: white;
+            border-bottom-color: rgba(255, 255, 255, 0.3);
+        }
+        
+        .message.user .message-text td {
+            color: rgba(255, 255, 255, 0.9);
+            border-bottom-color: rgba(255, 255, 255, 0.1);
+        }
+        
+        .message.user .message-text tr:hover {
+            background: rgba(255, 255, 255, 0.15);
         }
         .contract-viewer {
             width: 100%;
@@ -945,7 +985,19 @@
                 .replace(/&lt;li&gt;/g, '<li>')
                 .replace(/&lt;\/li&gt;/g, '</li>')
                 .replace(/&lt;blockquote&gt;/g, '<blockquote>')
-                .replace(/&lt;\/blockquote&gt;/g, '</blockquote>');
+                .replace(/&lt;\/blockquote&gt;/g, '</blockquote>')
+                .replace(/&lt;table&gt;/g, '<table>')
+                .replace(/&lt;\/table&gt;/g, '</table>')
+                .replace(/&lt;thead&gt;/g, '<thead>')
+                .replace(/&lt;\/thead&gt;/g, '</thead>')
+                .replace(/&lt;tbody&gt;/g, '<tbody>')
+                .replace(/&lt;\/tbody&gt;/g, '</tbody>')
+                .replace(/&lt;tr&gt;/g, '<tr>')
+                .replace(/&lt;\/tr&gt;/g, '</tr>')
+                .replace(/&lt;th&gt;/g, '<th>')
+                .replace(/&lt;\/th&gt;/g, '</th>')
+                .replace(/&lt;td&gt;/g, '<td>')
+                .replace(/&lt;\/td&gt;/g, '</td>');
             
             return formattedContent;
         }

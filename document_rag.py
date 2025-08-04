@@ -633,20 +633,24 @@ CORE INSTRUCTIONS:
 - Maintain a professional and helpful tone
 
 RESPONSE FORMAT:
-- DO NOT use markdown formatting (no **, *, #, -, etc.)
-- Generate rich text with proper HTML formatting
+- CRITICAL: DO NOT use markdown formatting (no **, *, #, -, |, etc.)
+- CRITICAL: Generate rich text with proper HTML formatting ONLY
 - Use <h1>, <h2>, <h3> for headings with appropriate hierarchy
 - Use <strong> for key terms, important concepts, or critical warnings
 - Use <em> for emphasis on important points
 - Use <ul> and <li> for bullet lists when listing concrete items
 - Use <ol> and <li> for numbered lists when providing step-by-step instructions
 - Use <blockquote> for important quotes or references
+- Use <table>, <thead>, <tbody>, <tr>, <th>, <td> for data tables
 - Write in natural, flowing paragraphs without unnecessary <p> tags
 - Keep spacing compact and avoid excessive line breaks
 - Provide direct answers based on the document content
 - Include specific details and examples when available
 - If multiple documents contain relevant information, synthesize them coherently
-- End with a brief statement about which documents were referenced"""
+- End with a brief statement about which documents were referenced
+- EXAMPLE: Use <strong>important term</strong> instead of **important term**
+- EXAMPLE: Use <h2>Section Title</h2> instead of ## Section Title
+- EXAMPLE: Use <table><tr><th>Header</th></tr><tr><td>Data</td></tr></table> instead of | Header |"""
     
     def update_system_prompt(self, new_prompt: str) -> bool:
         """Update the system prompt for AI responses"""
@@ -673,20 +677,24 @@ CORE INSTRUCTIONS:
 - Maintain a professional and helpful tone
 
 RESPONSE FORMAT:
-- DO NOT use markdown formatting (no **, *, #, -, etc.)
-- Generate rich text with proper HTML formatting
+- CRITICAL: DO NOT use markdown formatting (no **, *, #, -, |, etc.)
+- CRITICAL: Generate rich text with proper HTML formatting ONLY
 - Use <h1>, <h2>, <h3> for headings with appropriate hierarchy
 - Use <strong> for key terms, important concepts, or critical warnings
 - Use <em> for emphasis on important points
 - Use <ul> and <li> for bullet lists when listing concrete items
 - Use <ol> and <li> for numbered lists when providing step-by-step instructions
 - Use <blockquote> for important quotes or references
+- Use <table>, <thead>, <tbody>, <tr>, <th>, <td> for data tables
 - Write in natural, flowing paragraphs without unnecessary <p> tags
 - Keep spacing compact and avoid excessive line breaks
 - Provide direct answers based on the document content
 - Include specific details and examples when available
 - If multiple documents contain relevant information, synthesize them coherently
-- End with a brief statement about which documents were referenced"""
+- End with a brief statement about which documents were referenced
+- EXAMPLE: Use <strong>important term</strong> instead of **important term**
+- EXAMPLE: Use <h2>Section Title</h2> instead of ## Section Title
+- EXAMPLE: Use <table><tr><th>Header</th></tr><tr><td>Data</td></tr></table> instead of | Header |"""
         
         self.system_prompt = default_prompt
         return self.system_prompt
