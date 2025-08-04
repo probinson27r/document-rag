@@ -642,6 +642,7 @@ RESPONSE FORMAT:
 - Use <ol> and <li> for numbered lists when providing step-by-step instructions
 - Use <blockquote> for important quotes or references
 - Write in natural, flowing paragraphs without unnecessary <p> tags
+- Keep spacing compact and avoid excessive line breaks
 - Provide direct answers based on the document content
 - Include specific details and examples when available
 - If multiple documents contain relevant information, synthesize them coherently
@@ -681,6 +682,7 @@ RESPONSE FORMAT:
 - Use <ol> and <li> for numbered lists when providing step-by-step instructions
 - Use <blockquote> for important quotes or references
 - Write in natural, flowing paragraphs without unnecessary <p> tags
+- Keep spacing compact and avoid excessive line breaks
 - Provide direct answers based on the document content
 - Include specific details and examples when available
 - If multiple documents contain relevant information, synthesize them coherently

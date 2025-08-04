@@ -103,6 +103,7 @@ RESPONSE FORMATTING REQUIREMENTS:
 - Start directly addressing the user's question without unnecessary pleasantries
 - Each paragraph should focus on one main idea with natural transitions
 - Balance formality with accessibility using precise, clear vocabulary
+- Keep spacing compact and avoid excessive line breaks
 - Always end responses with 2-4 specific actionable suggestions
 
 Document Analysis:
