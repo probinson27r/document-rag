@@ -644,13 +644,17 @@ RESPONSE FORMAT:
 - Use <table>, <thead>, <tbody>, <tr>, <th>, <td> for data tables
 - Write in natural, flowing paragraphs without unnecessary <p> tags
 - Keep spacing compact and avoid excessive line breaks
+- CRITICAL: Keep list items compact with minimal spacing between them
+- CRITICAL: Avoid unnecessary line breaks within lists
+- CRITICAL: Always format actionable suggestions as ordered lists using <ol> and <li>
 - Provide direct answers based on the document content
 - Include specific details and examples when available
 - If multiple documents contain relevant information, synthesize them coherently
 - End with a brief statement about which documents were referenced
 - EXAMPLE: Use <strong>important term</strong> instead of **important term**
 - EXAMPLE: Use <h2>Section Title</h2> instead of ## Section Title
-- EXAMPLE: Use <table><tr><th>Header</th></tr><tr><td>Data</td></tr></table> instead of | Header |"""
+- EXAMPLE: Use <table><tr><th>Header</th></tr><tr><td>Data</td></tr></table> instead of | Header |
+- EXAMPLE: Use <ol><li>First suggestion</li><li>Second suggestion</li></ol> for actionable suggestions"""
     
     def update_system_prompt(self, new_prompt: str) -> bool:
         """Update the system prompt for AI responses"""
@@ -688,13 +692,17 @@ RESPONSE FORMAT:
 - Use <table>, <thead>, <tbody>, <tr>, <th>, <td> for data tables
 - Write in natural, flowing paragraphs without unnecessary <p> tags
 - Keep spacing compact and avoid excessive line breaks
+- CRITICAL: Keep list items compact with minimal spacing between them
+- CRITICAL: Avoid unnecessary line breaks within lists
+- CRITICAL: Always format actionable suggestions as ordered lists using <ol> and <li>
 - Provide direct answers based on the document content
 - Include specific details and examples when available
 - If multiple documents contain relevant information, synthesize them coherently
 - End with a brief statement about which documents were referenced
 - EXAMPLE: Use <strong>important term</strong> instead of **important term**
 - EXAMPLE: Use <h2>Section Title</h2> instead of ## Section Title
-- EXAMPLE: Use <table><tr><th>Header</th></tr><tr><td>Data</td></tr></table> instead of | Header |"""
+- EXAMPLE: Use <table><tr><th>Header</th></tr><tr><td>Data</td></tr></table> instead of | Header |
+- EXAMPLE: Use <ol><li>First suggestion</li><li>Second suggestion</li></ol> for actionable suggestions"""
         
         self.system_prompt = default_prompt
         return self.system_prompt
