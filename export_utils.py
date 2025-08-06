@@ -23,9 +23,9 @@ class ExportManager:
     
     def _setup_custom_styles(self):
         """Setup custom styles for better formatting"""
-        # Custom styles for PDF
+        # Custom styles for PDF - use unique names to avoid conflicts
         self.styles.add(ParagraphStyle(
-            name='Heading1',
+            name='CustomHeading1',
             parent=self.styles['Heading1'],
             fontSize=16,
             spaceAfter=12,
@@ -34,7 +34,7 @@ class ExportManager:
         ))
         
         self.styles.add(ParagraphStyle(
-            name='Heading2',
+            name='CustomHeading2',
             parent=self.styles['Heading2'],
             fontSize=14,
             spaceAfter=10,
@@ -43,7 +43,7 @@ class ExportManager:
         ))
         
         self.styles.add(ParagraphStyle(
-            name='BodyText',
+            name='CustomBodyText',
             parent=self.styles['BodyText'],
             fontSize=11,
             spaceAfter=6,
@@ -169,7 +169,7 @@ class ExportManager:
         story = []
         
         # Title
-        title = Paragraph("AI Response Report", self.styles['Heading1'])
+        title = Paragraph("AI Response Report", self.styles['CustomHeading1'])
         story.append(title)
         story.append(Spacer(1, 12))
         
@@ -189,19 +189,19 @@ class ExportManager:
             if element['type'] == 'spacer':
                 story.append(Spacer(1, 6))
             elif element['type'] == 'heading1':
-                story.append(Paragraph(element['text'], self.styles['Heading1']))
+                story.append(Paragraph(element['text'], self.styles['CustomHeading1']))
             elif element['type'] == 'heading2':
-                story.append(Paragraph(element['text'], self.styles['Heading2']))
+                story.append(Paragraph(element['text'], self.styles['CustomHeading2']))
             elif element['type'] == 'heading3':
                 story.append(Paragraph(element['text'], self.styles['Heading3']))
             elif element['type'] == 'paragraph':
-                story.append(Paragraph(element['text'], self.styles['BodyText']))
+                story.append(Paragraph(element['text'], self.styles['CustomBodyText']))
             elif element['type'] == 'bold':
                 story.append(Paragraph(element['text'], self.styles['Heading3']))
             elif element['type'] == 'italic':
                 story.append(Paragraph(element['text'], self.styles['Italic']))
             elif element['type'] == 'list_item':
-                story.append(Paragraph(f"• {element['text']}", self.styles['BodyText']))
+                story.append(Paragraph(f"• {element['text']}", self.styles['CustomBodyText']))
             elif element['type'] == 'table_row':
                 # Simple table handling
                 cells = [cell.strip() for cell in element['text'].split('|') if cell.strip()]
@@ -224,9 +224,9 @@ class ExportManager:
         sources = response_data.get('sources', [])
         if sources:
             story.append(Spacer(1, 20))
-            story.append(Paragraph("Sources:", self.styles['Heading2']))
+            story.append(Paragraph("Sources:", self.styles['CustomHeading2']))
             for i, source in enumerate(sources, 1):
-                story.append(Paragraph(f"{i}. {source}", self.styles['BodyText']))
+                story.append(Paragraph(f"{i}. {source}", self.styles['CustomBodyText']))
         
         # Build PDF
         doc.build(story)
