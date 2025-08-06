@@ -52,6 +52,10 @@ class ExportManager:
     
     def _clean_html_for_export(self, html_content: str) -> str:
         """Clean HTML content for export, preserving structure"""
+        # Ensure we have a string
+        if not isinstance(html_content, str):
+            html_content = str(html_content)
+        
         # Remove script and style tags
         html_content = re.sub(r'<script[^>]*>.*?</script>', '', html_content, flags=re.DOTALL)
         html_content = re.sub(r'<style[^>]*>.*?</style>', '', html_content, flags=re.DOTALL)

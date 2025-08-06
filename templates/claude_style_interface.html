@@ -923,12 +923,22 @@
             // Add export buttons for assistant messages
             let exportButtonsHtml = '';
             if (role === 'assistant') {
+                const contentId = 'content_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+                const sourcesId = 'sources_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+                
+                // Store content and sources in data attributes
                 exportButtonsHtml = `
                     <div class="message-export-buttons">
-                        <button class="export-btn export-pdf-btn" onclick="exportResponseToPdf('${escapeHtml(content)}', ${JSON.stringify(sources).replace(/"/g, '&quot;')})">
+                        <button class="export-btn export-pdf-btn" 
+                                data-content="${escapeHtml(content)}" 
+                                data-sources='${JSON.stringify(sources)}'
+                                onclick="exportResponseToPdf(this)">
                             📄 PDF
                         </button>
-                        <button class="export-btn export-word-btn" onclick="exportResponseToWord('${escapeHtml(content)}', ${JSON.stringify(sources).replace(/"/g, '&quot;')})">
+                        <button class="export-btn export-word-btn" 
+                                data-content="${escapeHtml(content)}" 
+                                data-sources='${JSON.stringify(sources)}'
+                                onclick="exportResponseToWord(this)">
                             📝 Word
                         </button>
                     </div>
@@ -1091,8 +1101,11 @@
         }
 
         // Individual response export functions
-        async function exportResponseToPdf(content, sources) {
+        async function exportResponseToPdf(button) {
             try {
+                const content = button.getAttribute('data-content');
+                const sources = JSON.parse(button.getAttribute('data-sources') || '[]');
+                
                 const response = await fetch('/api/export/pdf', {
                     method: 'POST',
                     headers: {
@@ -1100,7 +1113,7 @@
                     },
                     body: JSON.stringify({
                         response: content,
-                        sources: sources || []
+                        sources: sources
                     })
                 });
                 
@@ -1123,8 +1136,11 @@
             }
         }
 
-        async function exportResponseToWord(content, sources) {
+        async function exportResponseToWord(button) {
             try {
+                const content = button.getAttribute('data-content');
+                const sources = JSON.parse(button.getAttribute('data-sources') || '[]');
+                
                 const response = await fetch('/api/export/word', {
                     method: 'POST',
                     headers: {
@@ -1132,7 +1148,7 @@
                     },
                     body: JSON.stringify({
                         response: content,
-                        sources: sources || []
+                        sources: sources
                     })
                 });
                 

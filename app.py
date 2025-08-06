@@ -1,6 +1,7 @@
 import os
 import json
 import logging
+import io
 from datetime import datetime
 from flask import Flask, request, jsonify, render_template, session, send_file, after_this_request, send_from_directory, redirect, url_for
 from werkzeug.utils import secure_filename
@@ -1919,6 +1920,7 @@ def export_to_pdf():
             return jsonify({'error': 'Response data is required'}), 400
         
         # Generate PDF
+        logger.info(f"Exporting PDF with data: {export_data}")
         pdf_content = export_manager.export_to_pdf(export_data)
         filename = export_manager.get_export_filename('pdf')
         
@@ -1963,6 +1965,7 @@ def export_to_word():
             return jsonify({'error': 'Response data is required'}), 400
         
         # Generate Word document
+        logger.info(f"Exporting Word with data: {export_data}")
         docx_content = export_manager.export_to_word(export_data)
         filename = export_manager.get_export_filename('docx')
         
