@@ -682,10 +682,11 @@
                     <img src="/static/Dewey.jpeg" alt="Dewey" class="chat-dewey-logo">
                     Chat
                 </div>
-                <div class="chat-actions">
-                    <button class="btn" id="clearChatBtn">Clear Chat</button>
-                    <button class="btn" id="exportChatBtn">Export</button>
-                </div>
+                                    <div class="chat-actions">
+                        <button class="btn" id="clearChatBtn">Clear Chat</button>
+                        <button class="btn" id="exportChatBtn">Export</button>
+                        <button class="btn" id="logoutBtn">Logout</button>
+                    </div>
             </div>
 
             <div class="messages-container" id="messagesContainer">
@@ -729,6 +730,7 @@
         const elements = {
             clearChatBtn: document.getElementById('clearChatBtn'),
             exportChatBtn: document.getElementById('exportChatBtn'),
+            logoutBtn: document.getElementById('logoutBtn'),
             messagesContainer: document.getElementById('messagesContainer'),
             welcomeMessage: document.getElementById('welcomeMessage'),
             typingIndicator: document.getElementById('typingIndicator'),
@@ -753,6 +755,7 @@
             elements.messageInput.addEventListener('keydown', handleKeyDown);
             elements.clearChatBtn.addEventListener('click', clearChat);
             elements.exportChatBtn.addEventListener('click', exportChat);
+            elements.logoutBtn.addEventListener('click', logout);
 
             // Auto-resize textarea
             elements.messageInput.addEventListener('input', autoResizeTextarea);
@@ -909,6 +912,12 @@
             a.download = `chat-export-${new Date().toISOString().split('T')[0]}.json`;
             a.click();
             URL.revokeObjectURL(url);
+        }
+
+        function logout() {
+            if (confirm('Are you sure you want to logout?')) {
+                window.location.href = '/logout';
+            }
         }
 
         function saveChatHistory() {

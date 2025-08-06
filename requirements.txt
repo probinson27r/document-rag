@@ -13,3 +13,6 @@ PyPDF2
 python-docx
 requests
 sentence-transformers
+boto3
+PyJWT
+cryptography

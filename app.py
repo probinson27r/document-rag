@@ -2,7 +2,7 @@ import os
 import json
 import logging
 from datetime import datetime
-from flask import Flask, request, jsonify, render_template, session, send_file, after_this_request, send_from_directory
+from flask import Flask, request, jsonify, render_template, session, send_file, after_this_request, send_from_directory, redirect, url_for
 from werkzeug.utils import secure_filename
 import chromadb
 from chromadb.config import Settings
@@ -18,6 +18,7 @@ from legal_document_rag import process_legal_pdf_nemo
 import threading
 import time
 import uuid
+from cognito_auth import require_auth, get_login_url, get_logout_url, exchange_code_for_tokens, get_user_info
 
 # Load environment variables from .env.local
 try:
@@ -450,23 +451,121 @@ def ingest_legal_document(file_path: str, processing_id: str = None) -> dict:
             'error': str(e)
         }
 
+@app.route('/login')
+def login():
+    """Show custom login page"""
+    return render_template('login.html')
+
+@app.route('/logout')
+def logout():
+    """Logout user and redirect to Cognito logout"""
+    # Clear session
+    session.clear()
+    logout_url = get_logout_url()
+    return redirect(logout_url)
+
+@app.route('/callback')
+def auth_callback():
+    """Handle Cognito authentication callback"""
+    error = request.args.get('error')
+    if error:
+        return jsonify({'error': error}), 400
+    
+    code = request.args.get('code')
+    if not code:
+        return jsonify({'error': 'No authorization code received'}), 400
+    
+    # Exchange code for tokens
+    tokens = exchange_code_for_tokens(code, request.url_root.rstrip('/'))
+    if not tokens:
+        return jsonify({'error': 'Failed to exchange code for tokens'}), 400
+
+    # Get user information
+    user_info = get_user_info(tokens['access_token'])
+    if not user_info:
+        return jsonify({'error': 'Failed to get user information'}), 400
+
+    # Store tokens and user info in session
+    session['access_token'] = tokens['access_token']
+    session['refresh_token'] = tokens.get('refresh_token')
+    session['user_info'] = user_info
+
+    # Redirect to main application
+    return redirect(url_for('index'))
+
+@app.route('/auth/direct', methods=['POST'])
+def direct_auth():
+    """Handle direct authentication"""
+    try:
+        username = request.form.get('username')
+        password = request.form.get('password')
+        
+        if not username or not password:
+            return jsonify({'error': 'Username and password required'}), 400
+        
+        # Use boto3 to authenticate directly
+        import boto3
+        client = boto3.client('cognito-idp', region_name='ap-southeast-2')
+        
+        response = client.initiate_auth(
+            ClientId='5cbftujsn7j6vbmtfv6corljbj',
+            AuthFlow='USER_PASSWORD_AUTH',
+            AuthParameters={
+                'USERNAME': username,
+                'PASSWORD': password
+            }
+        )
+        
+        if 'AuthenticationResult' in response:
+            tokens = response['AuthenticationResult']
+            
+            # Create user info from the ID token instead of calling userInfo endpoint
+            import jwt
+            try:
+                # Decode the ID token to get user information
+                id_token = tokens['IdToken']
+                # Note: We're not verifying the signature for simplicity in this test
+                # In production, you should verify the JWT signature
+                user_info = jwt.decode(id_token, options={"verify_signature": False})
+                
+                # Store tokens and user info in session
+                session['access_token'] = tokens['AccessToken']
+                session['refresh_token'] = tokens.get('RefreshToken')
+                session['user_info'] = user_info
+
+                return jsonify({'success': True, 'redirect': url_for('index')})
+            except Exception as e:
+                print(f"Error decoding ID token: {e}")
+                return jsonify({'error': 'Failed to process authentication'}), 400
+        else:
+            return jsonify({'error': 'Authentication failed'}), 401
+            
+    except Exception as e:
+        print(f"Direct auth error: {e}")
+        return jsonify({'error': 'Authentication failed'}), 401
+
 @app.route('/')
+@require_auth
 def index():
     return render_template('claude_style_interface.html')
 
 @app.route('/chat')
+@require_auth
 def chat():
     return render_template('claude_style_interface.html')
 
 @app.route('/claude')
+@require_auth
 def claude_style_chat():
     return render_template('claude_style_interface.html')
 
 @app.route('/configure')
+@require_auth
 def configure():
     return render_template('configure.html')
 
 @app.route('/upload', methods=['POST'])
+@require_auth
 def upload_file():
     import sys, traceback
     if not embedding_model or not collection:
@@ -586,6 +685,7 @@ def upload_file():
         return jsonify({'error': f'Upload failed: {str(e)}'}), 500
 
 @app.route('/api/processing/status/<processing_id>', methods=['GET'])
+@require_auth
 def get_processing_status(processing_id):
     """Get the status of document processing"""
     if processing_id not in processing_status:
@@ -602,6 +702,7 @@ def get_processing_status(processing_id):
     return jsonify(status)
 
 @app.route('/api/processing/cleanup', methods=['POST'])
+@require_auth
 def cleanup_processing_status():
     """Clean up old processing status entries"""
     current_time = time.time()
@@ -620,6 +721,7 @@ def cleanup_processing_status():
     })
 
 @app.route('/query', methods=['POST'])
+@require_auth
 def query():
     """Handle document queries"""
     try:
@@ -768,6 +870,7 @@ Let me help you understand this: [/INST]"""
         return jsonify({'error': f'Query failed: {str(e)}'}), 500
 
 @app.route('/chat', methods=['POST'])
+@require_auth
 def chat_endpoint():
     """Handle chat messages for the new interface"""
     try:
@@ -925,6 +1028,7 @@ Let me help you understand this: [/INST]"""
         return jsonify({'error': f'Chat failed: {str(e)}'}), 500
 
 @app.route('/api/status')
+@require_auth
 def api_status():
     """Check system status"""
     try:
@@ -941,6 +1045,7 @@ def api_status():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/models')
+@require_auth
 def api_models():
     """Get current model information"""
     try:
@@ -967,6 +1072,7 @@ def api_models():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/models/switch', methods=['POST'])
+@require_auth
 def switch_model():
     """Switch between available models"""
     global current_model
@@ -1006,6 +1112,7 @@ def switch_model():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/documents')
+@require_auth
 def api_documents():
     """Get list of ingested documents"""
     try:
@@ -1051,6 +1158,7 @@ def api_documents():
         return jsonify([])
 
 @app.route('/api/documents/<filename>/chunks')
+@require_auth
 def api_document_chunks(filename):
     """Get chunks for a specific document"""
     try:
@@ -1097,6 +1205,7 @@ def api_document_chunks(filename):
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/documents/<filename>/search')
+@require_auth
 def api_document_search(filename):
     """Search within a specific document"""
     try:
@@ -1159,6 +1268,7 @@ def api_document_search(filename):
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/documents/<filename>', methods=['DELETE'])
+@require_auth
 def api_delete_document(filename):
     """Delete a document and its chunks"""
     try:
@@ -1204,6 +1314,7 @@ def api_delete_document(filename):
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/documents/id/<document_id>')
+@require_auth
 def api_document_by_id(document_id):
     """Get document information by document ID"""
     try:
@@ -1256,6 +1367,7 @@ def api_document_by_id(document_id):
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/instructions', methods=['GET', 'POST'])
+@require_auth
 def api_instructions():
     """Get or set user instructions for the AI"""
     global user_instructions
@@ -1297,6 +1409,7 @@ I'm here to help you understand complex legal documents. Let me analyze the prov
             return jsonify({'error': str(e)}), 500
 
 @app.route('/api/instructions/reset', methods=['POST'])
+@require_auth
 def api_instructions_reset():
     """Reset instructions to default"""
     global user_instructions
@@ -1325,6 +1438,7 @@ I'm here to help you understand complex legal documents. Let me analyze the prov
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/prompt/templates')
+@require_auth
 def api_prompt_templates():
     """Get available prompt templates"""
     templates = {
@@ -1342,6 +1456,7 @@ def api_prompt_templates():
     return jsonify(templates)
 
 @app.route('/api/prompt', methods=['GET', 'POST'])
+@require_auth
 def api_prompt():
     """Get or set the current prompt"""
     if request.method == 'GET':
@@ -1354,12 +1469,14 @@ def api_prompt():
         return jsonify({'message': 'Prompt updated successfully', 'prompt': new_prompt})
 
 @app.route('/api/prompt/reset', methods=['POST'])
+@require_auth
 def api_prompt_reset():
     """Reset to default prompt"""
     default_prompt = 'You are a helpful assistant. Answer questions based on the provided document context.'
     return jsonify({'message': 'Prompt reset successfully', 'prompt': default_prompt})
 
 @app.route('/api/chat/history', methods=['GET', 'POST', 'DELETE'])
+@require_auth
 def api_chat_history():
     """Get, save, or clear chat history for the current session"""
     if request.method == 'GET':
@@ -1428,6 +1545,7 @@ def api_chat_history():
         })
 
 @app.route('/api/chat/history/export', methods=['GET'])
+@require_auth
 def api_export_chat_history():
     """Export chat history as JSON"""
     try:
@@ -1445,6 +1563,7 @@ def api_export_chat_history():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/chat/history/import', methods=['POST'])
+@require_auth
 def api_import_chat_history():
     """Import chat history from JSON"""
     try:
@@ -1473,6 +1592,7 @@ def api_import_chat_history():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/extract/gpt4', methods=['POST'])
+@require_auth
 def api_gpt4_extraction():
     """Extract data using GPT-4"""
     try:
@@ -1527,6 +1647,7 @@ def api_gpt4_extraction():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/extract/test', methods=['POST'])
+@require_auth
 def api_test_gpt4_extraction():
     """Test GPT-4 extraction with sample data"""
     try:
@@ -1580,6 +1701,7 @@ def api_test_gpt4_extraction():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/extraction/config', methods=['GET'])
+@require_auth
 def api_get_extraction_config():
     """Get current extraction configuration"""
     try:
@@ -1614,6 +1736,7 @@ def api_get_extraction_config():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/extraction/config', methods=['POST'])
+@require_auth
 def api_save_extraction_config():
     """Save extraction configuration"""
     try:
@@ -1663,6 +1786,7 @@ def api_save_extraction_config():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/extraction/status', methods=['GET'])
+@require_auth
 def api_extraction_status():
     """Get extraction system status and capabilities"""
     try:
@@ -1715,10 +1839,12 @@ def api_extraction_status():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/contract')
+@require_auth
 def contract_viewer_page():
     return render_template('contract_viewer.html')
 
 @app.route('/contract/latest')
+@require_auth
 def serve_latest_contract():
     """Serve the most recently uploaded PDF contract from the uploads directory."""
     try:
