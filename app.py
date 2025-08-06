@@ -91,28 +91,46 @@ General Guidelines:
 - Always include the document name used in the response and source list
 
 RESPONSE FORMATTING REQUIREMENTS:
-- CRITICAL: DO NOT use markdown formatting (no **, *, #, -, |, etc.)
+- CRITICAL: ALWAYS return valid HTML - never plain text or markdown
+- CRITICAL: DO NOT use markdown formatting (no **, *, #, -, |, ```, etc.)
+- CRITICAL: DO NOT wrap HTML in code blocks or markdown fences
 - CRITICAL: Generate rich text with proper HTML formatting ONLY
+- CRITICAL: Every response must be wrapped in valid HTML tags
+- CRITICAL: Return raw HTML directly, not inside ```html``` blocks
+- CRITICAL: Do NOT include <html>, <head>, or <body> tags - just the content
+- CRITICAL: NEVER use **text** for bold - ALWAYS use <strong>text</strong>
+- CRITICAL: NEVER use *text* for italic - ALWAYS use <em>text</em>
+- CRITICAL: NEVER use # for headings - ALWAYS use <h1>, <h2>, <h3>
+- CRITICAL: NEVER use - for lists - ALWAYS use <ul><li> or <ol><li>
+- CRITICAL: NEVER use numbered lists with markdown like "1. **text**" - ALWAYS use <ol><li><strong>text</strong></li></ol>
+- CRITICAL: NEVER mix numbered lists with markdown formatting
 - Use <h1>, <h2>, <h3> for headings with appropriate hierarchy
 - Use <strong> for key terms, important concepts, or critical warnings
 - Use <em> for emphasis on important points
-                    - Use <ul> and <li> for bullet lists when listing concrete items
-                    - Use <ol> and <li> for numbered lists when providing step-by-step instructions
-                    - Use <blockquote> for important quotes or references
-                    - Use <table>, <thead>, <tbody>, <tr>, <th>, <td> for data tables
-                    - Write in natural, flowing paragraphs without unnecessary <p> tags
-                    - Use complete sentences that connect ideas smoothly
-                    - Start directly addressing the user's question without unnecessary pleasantries
-                    - Each paragraph should focus on one main idea with natural transitions
-                    - Balance formality with accessibility using precise, clear vocabulary
-                    - Keep spacing compact and avoid excessive line breaks
-                    - CRITICAL: Keep list items compact with minimal spacing between them
-                    - CRITICAL: Avoid unnecessary line breaks within lists
-                    - CRITICAL: Always format actionable suggestions as ordered lists using <ol> and <li>
-                    - EXAMPLE: Use <strong>important term</strong> instead of **important term**
-                    - EXAMPLE: Use <h2>Section Title</h2> instead of ## Section Title
-                    - EXAMPLE: Use <table><tr><th>Header</th></tr><tr><td>Data</td></tr></table> instead of | Header |
-                    - EXAMPLE: Use <ol><li>First suggestion</li><li>Second suggestion</li></ol> for actionable suggestions
+- Use <ul> and <li> for bullet lists when listing concrete items
+- Use <ol> and <li> for numbered lists when providing step-by-step instructions
+- Use <blockquote> for important quotes or references
+- Use <table>, <thead>, <tbody>, <tr>, <th>, <td> for data tables
+- Write in natural, flowing paragraphs without unnecessary <p> tags
+- Use complete sentences that connect ideas smoothly
+- Start directly addressing the user's question without unnecessary pleasantries
+- Each paragraph should focus on one main idea with natural transitions
+- Balance formality with accessibility using precise, clear vocabulary
+- Keep spacing compact and avoid excessive line breaks
+- CRITICAL: Keep list items compact with minimal spacing between them
+- CRITICAL: Avoid unnecessary line breaks within lists
+- CRITICAL: Always format actionable suggestions as ordered lists using <ol> and <li>
+- CRITICAL: If creating tables, use proper HTML table structure: <table><thead><tr><th>Header1</th><th>Header2</th></tr></thead><tbody><tr><td>Data1</td><td>Data2</td></tr></tbody></table>
+- EXAMPLE: Use <strong>important term</strong> instead of **important term**
+- EXAMPLE: Use <h2>Section Title</h2> instead of ## Section Title
+- EXAMPLE: Use <table><thead><tr><th>Header</th></tr></thead><tbody><tr><td>Data</td></tr></tbody></table> instead of | Header |
+- EXAMPLE: Use <ol><li>First suggestion</li><li>Second suggestion</li></ol> for actionable suggestions
+- EXAMPLE: Use <ul><li>First item</li><li>Second item</li></ul> for bullet lists
+- CRITICAL EXAMPLE: Return <table><tr><th>Header</th></tr><tr><td>Data</td></tr></table> NOT ```html<table>...</table>```
+- CORRECT FORMAT: Start directly with content like <h2>Title</h2><p>Content</p><table>...</table> NOT <html><body>...
+- CRITICAL: Use <strong>service variation</strong> NOT **service variation**
+- CRITICAL: Use <strong>Section 3.4</strong> NOT **Section 3.4**
+- CRITICAL: Use <ol><li><strong>Service Variation Process</strong></li></ol> NOT "1. **Service Variation Process**"
 - Always end responses with 2-4 specific actionable suggestions in an ordered list format
 
 Document Analysis:
@@ -434,11 +452,15 @@ def ingest_legal_document(file_path: str, processing_id: str = None) -> dict:
 
 @app.route('/')
 def index():
-    return render_template('index.html')
+    return render_template('claude_style_interface.html')
 
 @app.route('/chat')
 def chat():
-    return render_template('chat_interface.html')
+    return render_template('claude_style_interface.html')
+
+@app.route('/claude')
+def claude_style_chat():
+    return render_template('claude_style_interface.html')
 
 @app.route('/configure')
 def configure():
@@ -744,6 +766,163 @@ Let me help you understand this: [/INST]"""
     except Exception as e:
         logger.error(f"Query error: {e}")
         return jsonify({'error': f'Query failed: {str(e)}'}), 500
+
+@app.route('/chat', methods=['POST'])
+def chat_endpoint():
+    """Handle chat messages for the new interface"""
+    try:
+        data = request.get_json()
+        message = data.get('message', '').strip()
+        model = data.get('model', current_model)
+        temperature = data.get('temperature', 0.7)
+        history = data.get('history', [])
+        
+        if not message:
+            return jsonify({'error': 'No message provided'}), 400
+        
+        # Search for relevant chunks
+        results = collection.query(
+            query_texts=[message],
+            n_results=5,
+            include=['documents', 'metadatas', 'distances']
+        )
+        
+        if not results['documents'] or not results['documents'][0]:
+            return jsonify({
+                'response': 'No relevant information found in the documents.',
+                'sources': []
+            })
+        
+        # Prepare context from chunks
+        context_chunks = results['documents'][0]
+        context = '\n\n'.join(context_chunks)
+        
+        # Generate response based on specified model
+        if model == 'Claude Sonnet 4' and claude_client:
+            # Use Claude API with user instructions
+            prompt = f"""{user_instructions}
+
+Context from the legal document:
+{context}
+
+Your question: {message}
+
+Let me help you understand this:"""
+            
+            response = claude_client.messages.create(
+                model="claude-3-5-sonnet-20241022",
+                max_tokens=8000,
+                temperature=temperature,
+                messages=[{"role": "user", "content": prompt}]
+            )
+            answer = response.content[0].text
+            
+        elif model == 'OpenAI GPT-4' and openai_client:
+            # Use OpenAI API with user instructions
+            completion = openai_client.chat.completions.create(
+                model=openai_model_name,
+                messages=[{"role": "system", "content": user_instructions},
+                         {"role": "user", "content": f"Context from the legal document:\n{context}\n\nYour question: {message}\nLet me help you understand this:"}],
+                max_tokens=4000,
+                temperature=temperature
+            )
+            answer = completion.choices[0].message.content
+            
+        elif model == 'Jan.ai GPT-4' and jan_client:
+            # Use Jan.ai local API with user instructions
+            headers = {
+                'Content-Type': 'application/json',
+                'Authorization': f'Bearer {jan_client["api_key"]}'
+            }
+            
+            payload = {
+                'model': jan_model_name,
+                'messages': [
+                    {"role": "system", "content": user_instructions},
+                    {"role": "user", "content": f"Context from the legal document:\n{context}\n\nYour question: {message}\nLet me help you understand this:"}
+                ],
+                'max_tokens': 4000,
+                'temperature': temperature
+            }
+            
+            response = requests.post(
+                f'{jan_client["base_url"]}/v1/chat/completions',
+                headers=headers,
+                json=payload,
+                timeout=120
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                answer = result['choices'][0]['message']['content']
+            else:
+                raise Exception(f"Jan.ai API error: {response.status_code} - {response.text}")
+                
+        elif model == 'Private GPT-4' and private_gpt4_client:
+            # Use Private GPT-4 API with user instructions
+            headers = {
+                'Content-Type': 'application/json',
+                'api-key': private_gpt4_client['api_key']
+            }
+            
+            payload = {
+                'model': private_gpt4_model_name,
+                'messages': [
+                    {"role": "system", "content": user_instructions},
+                    {"role": "user", "content": f"Context from the legal document:\n{context}\n\nYour question: {message}\nLet me help you understand this:"}
+                ],
+                'max_tokens': 4000,
+                'temperature': temperature
+            }
+            
+            response = requests.post(
+                private_gpt4_client['base_url'],
+                headers=headers,
+                json=payload,
+                timeout=120
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                answer = result['choices'][0]['message']['content']
+            else:
+                raise Exception(f"Private GPT-4 API error: {response.status_code} - {response.text}")
+        else:
+            # Use local Ollama model with user instructions
+            prompt = f"""<s>[INST] {user_instructions}
+
+Context from the legal document:
+{context}
+
+Your question: {message}
+
+Let me help you understand this: [/INST]"""
+            
+            # Map display names to actual model names for Ollama
+            ollama_model = model
+            if model in ['Claude Sonnet 4', 'OpenAI GPT-4', 'Jan.ai GPT-4', 'Private GPT-4']:
+                ollama_model = 'mistral:7b'  # Fallback to local model if external APIs not available
+            
+            response = ollama_client.chat(
+                model=ollama_model,
+                messages=[{'role': 'user', 'content': prompt}]
+            )
+            answer = response['message']['content']
+        
+        # Prepare sources
+        sources = []
+        for metadata in results['metadatas'][0]:
+            section_info = f"{metadata.get('section_number', 'Unknown')} - {metadata.get('section_title', 'Unknown')}"
+            sources.append(section_info)
+        
+        return jsonify({
+            'response': answer,
+            'sources': sources
+        })
+        
+    except Exception as e:
+        logger.error(f"Chat error: {e}")
+        return jsonify({'error': f'Chat failed: {str(e)}'}), 500
 
 @app.route('/api/status')
 def api_status():
