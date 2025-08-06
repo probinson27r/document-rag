@@ -68,6 +68,12 @@ instance/
 # Scrapy stuff:
 .scrapy
 
+# SSL Certificates (development only)
+certs/
+*.crt
+*.key
+*.pem
+
 # Sphinx documentation
 docs/_build/
 

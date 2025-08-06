@@ -4,6 +4,18 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ED19024</title>
+    
+    <!-- Hotjar Tracking Code for Site 6486052 (name missing) -->
+    <script>
+        (function(h,o,t,j,a,r){
+            h.hj=h.hj||function(){(h.hj.q=h.hj.q||[]).push(arguments)};
+            h._hjSettings={hjid:6486052,hjsv:6};
+            a=o.getElementsByTagName('head')[0];
+            r=o.createElement('script');r.async=1;
+            r.src=t+h._hjSettings.hjid+j+h._hjSettings.hjsv;
+            a.appendChild(r);
+        })(window,document,'https://static.hotjar.com/c/hotjar-','.js?sv=');
+    </script>
     <style>
         * {
             margin: 0;
@@ -724,6 +736,189 @@
             color: #2563eb;
         }
 
+        /* Feedback Button */
+        .feedback-button {
+            position: fixed;
+            bottom: 20px;
+            left: 20px;
+            background: #3b82f6;
+            color: white;
+            border: none;
+            border-radius: 50px;
+            padding: 12px 20px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+            transition: all 0.2s ease;
+            z-index: 1000;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .feedback-button:hover {
+            background: #2563eb;
+            transform: translateY(-2px);
+            box-shadow: 0 6px 16px rgba(59, 130, 246, 0.4);
+        }
+
+        .feedback-button:active {
+            transform: translateY(0);
+        }
+
+        /* Feedback Modal */
+        .feedback-modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 2000;
+            backdrop-filter: blur(4px);
+        }
+
+        .feedback-modal.show {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .feedback-modal-content {
+            background: white;
+            border-radius: 12px;
+            padding: 32px;
+            width: 90%;
+            max-width: 500px;
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+            animation: modalSlideIn 0.3s ease-out;
+        }
+
+        @keyframes modalSlideIn {
+            from {
+                opacity: 0;
+                transform: translateY(-20px) scale(0.95);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0) scale(1);
+            }
+        }
+
+        .feedback-modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 24px;
+        }
+
+        .feedback-modal-title {
+            font-size: 20px;
+            font-weight: 600;
+            color: #1a1a1a;
+        }
+
+        .feedback-modal-close {
+            background: none;
+            border: none;
+            font-size: 24px;
+            cursor: pointer;
+            color: #6b7280;
+            padding: 4px;
+            border-radius: 4px;
+            transition: color 0.2s ease;
+        }
+
+        .feedback-modal-close:hover {
+            color: #374151;
+        }
+
+        .feedback-form {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .feedback-form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .feedback-form-label {
+            font-size: 14px;
+            font-weight: 500;
+            color: #374151;
+        }
+
+        .feedback-form-input,
+        .feedback-form-textarea {
+            padding: 12px 16px;
+            border: 1px solid #d1d5db;
+            border-radius: 8px;
+            font-size: 14px;
+            transition: border-color 0.2s ease;
+            font-family: inherit;
+        }
+
+        .feedback-form-input:focus,
+        .feedback-form-textarea:focus {
+            outline: none;
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+        }
+
+        .feedback-form-textarea {
+            resize: vertical;
+            min-height: 120px;
+        }
+
+        .feedback-form-actions {
+            display: flex;
+            gap: 12px;
+            justify-content: flex-end;
+            margin-top: 8px;
+        }
+
+        .feedback-form-submit {
+            background: #3b82f6;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            padding: 12px 24px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background-color 0.2s ease;
+        }
+
+        .feedback-form-submit:hover {
+            background: #2563eb;
+        }
+
+        .feedback-form-submit:disabled {
+            background: #9ca3af;
+            cursor: not-allowed;
+        }
+
+        .feedback-form-cancel {
+            background: #f3f4f6;
+            color: #374151;
+            border: 1px solid #d1d5db;
+            border-radius: 8px;
+            padding: 12px 24px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .feedback-form-cancel:hover {
+            background: #e5e7eb;
+        }
+
 
     </style>
 </head>
@@ -1216,7 +1411,117 @@
             return div.innerHTML;
         }
 
+        // Feedback functionality
+        function openFeedbackModal() {
+            document.getElementById('feedbackModal').classList.add('show');
+        }
+
+        function closeFeedbackModal() {
+            document.getElementById('feedbackModal').classList.remove('show');
+            document.getElementById('feedbackForm').reset();
+        }
+
+        async function submitFeedback(event) {
+            event.preventDefault();
+            
+            const submitBtn = document.getElementById('feedbackSubmitBtn');
+            const originalText = submitBtn.textContent;
+            submitBtn.textContent = 'Submitting...';
+            submitBtn.disabled = true;
+
+            try {
+                const formData = new FormData(event.target);
+                const feedbackData = {
+                    title: formData.get('title'),
+                    details: formData.get('details')
+                };
+
+                const response = await fetch('/api/feedback', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(feedbackData)
+                });
+
+                if (response.ok) {
+                    const result = await response.json();
+                    showNotification('Feedback submitted successfully!', 'success');
+                    closeFeedbackModal();
+                } else {
+                    const error = await response.json();
+                    showNotification(`Failed to submit feedback: ${error.error}`, 'error');
+                }
+            } catch (error) {
+                console.error('Feedback submission error:', error);
+                showNotification('Failed to submit feedback', 'error');
+            } finally {
+                submitBtn.textContent = originalText;
+                submitBtn.disabled = false;
+            }
+        }
+
+        // Close modal when clicking outside
+        document.addEventListener('click', function(event) {
+            const modal = document.getElementById('feedbackModal');
+            if (event.target === modal) {
+                closeFeedbackModal();
+            }
+        });
+
+        // Close modal with Escape key
+        document.addEventListener('keydown', function(event) {
+            if (event.key === 'Escape') {
+                closeFeedbackModal();
+            }
+        });
 
     </script>
+
+    <!-- Feedback Button -->
+    <button class="feedback-button" onclick="openFeedbackModal()">
+        💬 Feedback
+    </button>
+
+    <!-- Feedback Modal -->
+    <div class="feedback-modal" id="feedbackModal">
+        <div class="feedback-modal-content">
+            <div class="feedback-modal-header">
+                <h2 class="feedback-modal-title">Send Feedback</h2>
+                <button class="feedback-modal-close" onclick="closeFeedbackModal()">&times;</button>
+            </div>
+            <form class="feedback-form" id="feedbackForm" onsubmit="submitFeedback(event)">
+                <div class="feedback-form-group">
+                    <label class="feedback-form-label" for="feedbackTitle">Title</label>
+                    <input 
+                        type="text" 
+                        id="feedbackTitle" 
+                        name="title" 
+                        class="feedback-form-input" 
+                        placeholder="Brief description of your feedback"
+                        required
+                    >
+                </div>
+                <div class="feedback-form-group">
+                    <label class="feedback-form-label" for="feedbackDetails">Details</label>
+                    <textarea 
+                        id="feedbackDetails" 
+                        name="details" 
+                        class="feedback-form-textarea" 
+                        placeholder="Please provide detailed feedback about your experience, suggestions for improvement, or report any issues you encountered..."
+                        required
+                    ></textarea>
+                </div>
+                <div class="feedback-form-actions">
+                    <button type="button" class="feedback-form-cancel" onclick="closeFeedbackModal()">
+                        Cancel
+                    </button>
+                    <button type="submit" class="feedback-form-submit" id="feedbackSubmitBtn">
+                        Submit Feedback
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
 </body>
 </html> 

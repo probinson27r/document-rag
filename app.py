@@ -2,6 +2,7 @@ import os
 import json
 import logging
 import io
+import argparse
 from datetime import datetime
 from flask import Flask, request, jsonify, render_template, session, send_file, after_this_request, send_from_directory, redirect, url_for
 from werkzeug.utils import secure_filename
@@ -81,6 +82,10 @@ private_gpt4_base_url = 'https://doe-srt-sensai-nprd-apim.azure-api.net/doe-srt-
 
 # Get Private GPT-4 URL from environment or use default
 private_gpt4_url = os.getenv('PRIVATE_GPT4_URL', private_gpt4_base_url)
+
+# Canny.io configuration
+CANNY_API_KEY = os.getenv('CANNY_API_KEY')
+CANNY_BOARD_ID = os.getenv('CANNY_BOARD_ID')
 user_instructions = """You are Ed-AI, an AI assistant with expertise in technology, legal document analysis and ITIL. I aim to be helpful, honest, and direct while maintaining a warm, conversational tone.
 
 General Guidelines:
@@ -1062,6 +1067,11 @@ Let me help you understand this: [/INST]"""
         logger.error(f"Chat error: {e}")
         return jsonify({'error': f'Chat failed: {str(e)}'}), 500
 
+@app.route('/health')
+def health_check():
+    """Simple health check endpoint (no auth required)"""
+    return jsonify({'status': 'healthy', 'timestamp': datetime.now().isoformat()})
+
 @app.route('/api/status')
 @require_auth
 def api_status():
@@ -1989,7 +1999,165 @@ def export_to_word():
         logger.error(f"Error exporting to Word: {e}")
         return jsonify({'error': f'Failed to export Word document: {str(e)}'}), 500
 
+@app.route('/api/feedback', methods=['POST'])
+@require_auth
+def submit_feedback():
+    """Submit feedback to Canny.io"""
+    try:
+        if not CANNY_API_KEY:
+            return jsonify({'error': 'Canny API key not configured'}), 500
+        
+        if not CANNY_BOARD_ID:
+            return jsonify({'error': 'Canny board ID not configured'}), 500
+
+        data = request.get_json()
+        if not data or 'title' not in data or 'details' not in data:
+            return jsonify({'error': 'Title and details are required'}), 400
+
+        # Get user info from session
+        user_info = session.get('user_info', {})
+        user_email = user_info.get('email', 'anonymous@example.com')
+        user_name = user_info.get('name', 'Anonymous User')
+
+        # First, create or get the user in Canny
+        user_data = {
+            'apiKey': CANNY_API_KEY,
+            'email': user_email,
+            'name': user_name
+        }
+
+        # Create or update user in Canny
+        user_response = requests.post(
+            'https://canny.io/api/v1/users/create_or_update',
+            json=user_data,
+            headers={'Content-Type': 'application/json'}
+        )
+
+        if user_response.status_code != 200:
+            logger.error(f"Canny user creation error: {user_response.status_code} - {user_response.text}")
+            return jsonify({
+                'error': f'Failed to create user: {user_response.text}'
+            }), user_response.status_code
+
+        user_result = user_response.json()
+        author_id = user_result.get('id')
+
+        if not author_id:
+            logger.error(f"No author ID returned from Canny: {user_result}")
+            return jsonify({'error': 'Failed to get user ID from Canny'}), 500
+
+        # Now submit the feedback with the valid author ID
+        feedback_data = {
+            'apiKey': CANNY_API_KEY,
+            'boardID': CANNY_BOARD_ID,
+            'title': data['title'],
+            'details': data['details'],
+            'authorID': author_id
+        }
+
+        # Submit to Canny API
+        response = requests.post(
+            'https://canny.io/api/v1/posts/create',
+            json=feedback_data,
+            headers={'Content-Type': 'application/json'}
+        )
+
+        if response.status_code == 200:
+            result = response.json()
+            logger.info(f"Feedback submitted successfully: {result}")
+            return jsonify({
+                'success': True,
+                'message': 'Feedback submitted successfully',
+                'post_id': result.get('id')
+            })
+        else:
+            logger.error(f"Canny API error: {response.status_code} - {response.text}")
+            return jsonify({
+                'error': f'Failed to submit feedback: {response.text}'
+            }), response.status_code
+
+    except Exception as e:
+        logger.error(f"Error submitting feedback: {e}")
+        return jsonify({'error': f'Failed to submit feedback: {str(e)}'}), 500
+
+def generate_ssl_cert():
+    """Generate self-signed SSL certificate for localhost"""
+    import subprocess
+    from pathlib import Path
+    
+    # Create certs directory if it doesn't exist
+    certs_dir = Path("certs")
+    certs_dir.mkdir(exist_ok=True)
+    
+    cert_file = certs_dir / "localhost.crt"
+    key_file = certs_dir / "localhost.key"
+    
+    # Check if certificates already exist
+    if cert_file.exists() and key_file.exists():
+        print("✅ SSL certificates already exist")
+        return str(cert_file), str(key_file)
+    
+    print("🔐 Generating self-signed SSL certificates for localhost...")
+    
+    try:
+        # Generate private key
+        subprocess.run([
+            "openssl", "genrsa", "-out", str(key_file), "2048"
+        ], check=True, capture_output=True)
+        
+        # Generate certificate signing request
+        csr_file = certs_dir / "localhost.csr"
+        subprocess.run([
+            "openssl", "req", "-new", "-key", str(key_file), "-out", str(csr_file),
+            "-subj", "/C=AU/ST=WA/L=Perth/O=Development/CN=localhost"
+        ], check=True, capture_output=True)
+        
+        # Generate self-signed certificate
+        subprocess.run([
+            "openssl", "x509", "-req", "-in", str(csr_file), "-signkey", str(key_file),
+            "-out", str(cert_file), "-days", "365", "-extensions", "v3_req",
+            "-extfile", "-"
+        ], input=b"""
+[ v3_req ]
+basicConstraints = CA:FALSE
+keyUsage = nonRepudiation, digitalSignature, keyEncipherment
+subjectAltName = @alt_names
+
+[ alt_names ]
+DNS.1 = localhost
+DNS.2 = *.localhost
+IP.1 = 127.0.0.1
+IP.2 = ::1
+""", check=True, capture_output=True)
+        
+        # Clean up CSR file
+        csr_file.unlink(missing_ok=True)
+        
+        print("✅ SSL certificates generated successfully!")
+        print(f"   Certificate: {cert_file}")
+        print(f"   Private Key: {key_file}")
+        
+        return str(cert_file), str(key_file)
+        
+    except subprocess.CalledProcessError as e:
+        print(f"❌ Error generating certificates: {e}")
+        print("Make sure OpenSSL is installed on your system")
+        return None, None
+    except FileNotFoundError:
+        print("❌ OpenSSL not found. Please install OpenSSL:")
+        print("   macOS: brew install openssl")
+        print("   Ubuntu/Debian: sudo apt-get install openssl")
+        print("   Windows: Download from https://slproweb.com/products/Win32OpenSSL.html")
+        return None, None
+
 if __name__ == '__main__':
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(description='ED19024 Legal Document RAG System')
+    parser.add_argument('--https', action='store_true', help='Run with HTTPS (requires SSL certificates)')
+    parser.add_argument('--port', type=int, default=5001, help='Port to run the server on (default: 5001)')
+    parser.add_argument('--host', type=str, default='0.0.0.0', help='Host to bind to (default: 0.0.0.0)')
+    args = parser.parse_args()
+    
     # Initialize the RAG system
     if initialize_rag_system():
         print("✅ Legal Document RAG system initialized successfully")
@@ -1997,7 +2165,23 @@ if __name__ == '__main__':
         print(f"   Request timeout: {app.config['REQUEST_TIMEOUT']} seconds")
         print(f"   Upload timeout: {app.config['UPLOAD_TIMEOUT']} seconds")
         print(f"   Processing timeout: {app.config['PROCESSING_TIMEOUT']} seconds")
-        app.run(debug=True, host='0.0.0.0', port=5001, threaded=True)
+        
+        if args.https:
+            # Generate SSL certificates if needed
+            cert_file, key_file = generate_ssl_cert()
+            if cert_file and key_file:
+                print(f"🔐 Starting HTTPS server on https://localhost:{args.port}")
+                print(f"   Certificate: {cert_file}")
+                print(f"   Private Key: {key_file}")
+                print(f"⚠️  Note: You may see a security warning in your browser. This is normal for self-signed certificates.")
+                app.run(debug=True, host=args.host, port=args.port, threaded=True, 
+                       ssl_context=(cert_file, key_file))
+            else:
+                print("❌ Failed to generate SSL certificates. Falling back to HTTP.")
+                app.run(debug=True, host=args.host, port=args.port, threaded=True)
+        else:
+            print(f"🌐 Starting HTTP server on http://localhost:{args.port}")
+            app.run(debug=True, host=args.host, port=args.port, threaded=True)
     else:
         print("❌ Failed to initialize Legal Document RAG system")
         exit(1)
