@@ -856,8 +856,10 @@ Let me help you understand this: [/INST]"""
         # Prepare sources
         sources = []
         for metadata in results['metadatas'][0]:
+            filename = metadata.get('filename', 'Unknown Document')
             section_info = f"{metadata.get('section_number', 'Unknown')} - {metadata.get('section_title', 'Unknown')}"
-            sources.append(section_info)
+            source_info = f"{filename}: {section_info}"
+            sources.append(source_info)
         
         return jsonify({
             'answer': answer,
@@ -1046,8 +1048,10 @@ Let me help you understand this: [/INST]"""
         # Prepare sources
         sources = []
         for metadata in results['metadatas'][0]:
+            filename = metadata.get('filename', 'Unknown Document')
             section_info = f"{metadata.get('section_number', 'Unknown')} - {metadata.get('section_title', 'Unknown')}"
-            sources.append(section_info)
+            source_info = f"{filename}: {section_info}"
+            sources.append(source_info)
         
         return jsonify({
             'response': cleaned_answer,

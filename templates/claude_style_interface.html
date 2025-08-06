@@ -507,21 +507,19 @@
         /* Sources */
         .message-sources {
             margin-top: 12px;
-            padding: 8px 12px;
-            background: rgba(59, 130, 246, 0.05);
-            border-radius: 6px;
-            border-left: 3px solid #3b82f6;
         }
 
         .sources-label {
             font-size: 12px;
             font-weight: 600;
-            color: #3b82f6;
+            color: #6b7280;
             margin-bottom: 4px;
         }
 
         .source-list {
             list-style: none;
+            margin: 0;
+            padding: 0;
         }
 
         .source-tag {
@@ -725,6 +723,8 @@
             border-color: #3b82f6;
             color: #2563eb;
         }
+
+
     </style>
 </head>
 <body>
@@ -885,7 +885,7 @@
                     console.log('Response data:', data);
                     addMessage('assistant', data.response, data.sources);
                     conversationHistory.push({ role: 'user', content: message });
-                    conversationHistory.push({ role: 'assistant', content: data.response });
+                    conversationHistory.push({ role: 'assistant', content: data.response, sources: data.sources });
                     saveChatHistory();
                 } else {
                     const errorText = await response.text();
@@ -962,7 +962,7 @@
         }
 
         function formatMessage(content) {
-            // The AI now returns proper HTML, so just return the content as-is
+            // Return content as-is without any special formatting
             return content;
         }
 
@@ -1191,7 +1191,7 @@
                         if (msg.role === 'user') {
                             addMessage('user', msg.content);
                         } else if (msg.role === 'assistant') {
-                            addMessage('assistant', msg.content);
+                            addMessage('assistant', msg.content, msg.sources || []);
                         }
                     });
                 } catch (error) {
@@ -1215,6 +1215,8 @@
             div.textContent = text;
             return div.innerHTML;
         }
+
+
     </script>
 </body>
 </html> 

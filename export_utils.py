@@ -70,6 +70,10 @@ class ExportManager:
         html_content = re.sub(r'</h2>', '\n', html_content)
         html_content = re.sub(r'<h3[^>]*>', '\n\n### ', html_content)
         html_content = re.sub(r'</h3>', '\n', html_content)
+        
+        # Handle blockquote styling
+        html_content = re.sub(r'<blockquote[^>]*class="next-steps-blockquote"[^>]*>', '\n\n💡 **NEXT STEPS:**\n\n', html_content)
+        html_content = re.sub(r'</blockquote>', '\n', html_content)
         html_content = re.sub(r'<strong[^>]*>', '**', html_content)
         html_content = re.sub(r'</strong>', '**', html_content)
         html_content = re.sub(r'<em[^>]*>', '*', html_content)

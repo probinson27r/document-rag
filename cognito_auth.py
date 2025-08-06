@@ -84,6 +84,10 @@ def require_auth(f):
     """Decorator to require authentication"""
     @wraps(f)
     def decorated_function(*args, **kwargs):
+        # Check if authentication is disabled for local development
+        if os.getenv('DISABLE_AUTH', 'false').lower() == 'true':
+            return f(*args, **kwargs)
+        
         # Check if user is authenticated via session
         if 'user_info' in session:
             return f(*args, **kwargs)
