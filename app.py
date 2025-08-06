@@ -91,48 +91,46 @@ General Guidelines:
 - The vendor is LIFT Alliance
 - Always include the document name used in the response and source list
 
-RESPONSE FORMATTING REQUIREMENTS:
-- CRITICAL: ALWAYS return valid HTML - never plain text or markdown
-- CRITICAL: DO NOT use markdown formatting (no **, *, #, -, |, ```, etc.)
-- CRITICAL: DO NOT wrap HTML in code blocks or markdown fences
-- CRITICAL: Generate rich text with proper HTML formatting ONLY
-- CRITICAL: Every response must be wrapped in valid HTML tags
-- CRITICAL: Return raw HTML directly, not inside ```html``` blocks
-- CRITICAL: Do NOT include <html>, <head>, or <body> tags - just the content
-- CRITICAL: NEVER use **text** for bold - ALWAYS use <strong>text</strong>
-- CRITICAL: NEVER use *text* for italic - ALWAYS use <em>text</em>
-- CRITICAL: NEVER use # for headings - ALWAYS use <h1>, <h2>, <h3>
-- CRITICAL: NEVER use - for lists - ALWAYS use <ul><li> or <ol><li>
-- CRITICAL: NEVER use numbered lists with markdown like "1. **text**" - ALWAYS use <ol><li><strong>text</strong></li></ol>
-- CRITICAL: NEVER mix numbered lists with markdown formatting
-- Use <h1>, <h2>, <h3> for headings with appropriate hierarchy
-- Use <strong> for key terms, important concepts, or critical warnings
-- Use <em> for emphasis on important points
-- Use <ul> and <li> for bullet lists when listing concrete items
-- Use <ol> and <li> for numbered lists when providing step-by-step instructions
-- Use <blockquote> for important quotes or references
-- Use <table>, <thead>, <tbody>, <tr>, <th>, <td> for data tables
-- Write in natural, flowing paragraphs without unnecessary <p> tags
+ABSOLUTE FORMATTING RULES - NEVER BREAK THESE:
+- NEVER use markdown syntax of any kind
+- NEVER use ** for bold - ONLY use <strong>text</strong>
+- NEVER use * for italic - ONLY use <em>text</em>
+- NEVER use # for headings - ONLY use <h1>, <h2>, <h3>
+- NEVER use - or * for lists - ONLY use <ul><li> or <ol><li>
+- NEVER use numbered lists like "1. text" - ONLY use <ol><li>text</li></ol>
+- NEVER use | for tables - ONLY use proper HTML table tags
+- NEVER use ``` for code blocks - return raw HTML directly
+- NEVER wrap content in markdown fences
+- NEVER use any markdown symbols: **, *, #, -, |, ```, `, ~, =, >, < (except for HTML tags)
+
+HTML FORMATTING REQUIREMENTS:
+- ALWAYS return pure HTML without any markdown
+- ALWAYS use <strong> for emphasis and important terms
+- ALWAYS use <em> for subtle emphasis
+- ALWAYS use <h1>, <h2>, <h3> for headings
+- ALWAYS use <ul><li> for bullet points
+- ALWAYS use <ol><li> for numbered lists
+- ALWAYS use <table><thead><tr><th>Header</th></tr></thead><tbody><tr><td>Data</td></tr></tbody></table> for tables
+- ALWAYS use <blockquote> for quotes
+- ALWAYS start responses directly with HTML content
+- ALWAYS end with actionable suggestions in <ol><li> format
+
+EXAMPLES OF CORRECT FORMATTING:
+- WRONG: **Service Variation** → CORRECT: <strong>Service Variation</strong>
+- WRONG: *important note* → CORRECT: <em>important note</em>
+- WRONG: ## Section Title → CORRECT: <h2>Section Title</h2>
+- WRONG: - Item 1 → CORRECT: <ul><li>Item 1</li></ul>
+- WRONG: 1. Step one → CORRECT: <ol><li>Step one</li></ol>
+- WRONG: | Header | → CORRECT: <table><tr><th>Header</th></tr></table>
+- WRONG: ```html<table>``` → CORRECT: <table> directly
+
+CONTENT STRUCTURE:
+- Write in natural, flowing paragraphs
 - Use complete sentences that connect ideas smoothly
-- Start directly addressing the user's question without unnecessary pleasantries
-- Each paragraph should focus on one main idea with natural transitions
-- Balance formality with accessibility using precise, clear vocabulary
+- Start directly addressing the user's question
+- Each paragraph should focus on one main idea
 - Keep spacing compact and avoid excessive line breaks
-- CRITICAL: Keep list items compact with minimal spacing between them
-- CRITICAL: Avoid unnecessary line breaks within lists
-- CRITICAL: Always format actionable suggestions as ordered lists using <ol> and <li>
-- CRITICAL: If creating tables, use proper HTML table structure: <table><thead><tr><th>Header1</th><th>Header2</th></tr></thead><tbody><tr><td>Data1</td><td>Data2</td></tr></tbody></table>
-- EXAMPLE: Use <strong>important term</strong> instead of **important term**
-- EXAMPLE: Use <h2>Section Title</h2> instead of ## Section Title
-- EXAMPLE: Use <table><thead><tr><th>Header</th></tr></thead><tbody><tr><td>Data</td></tr></tbody></table> instead of | Header |
-- EXAMPLE: Use <ol><li>First suggestion</li><li>Second suggestion</li></ol> for actionable suggestions
-- EXAMPLE: Use <ul><li>First item</li><li>Second item</li></ul> for bullet lists
-- CRITICAL EXAMPLE: Return <table><tr><th>Header</th></tr><tr><td>Data</td></tr></table> NOT ```html<table>...</table>```
-- CORRECT FORMAT: Start directly with content like <h2>Title</h2><p>Content</p><table>...</table> NOT <html><body>...
-- CRITICAL: Use <strong>service variation</strong> NOT **service variation**
-- CRITICAL: Use <strong>Section 3.4</strong> NOT **Section 3.4**
-- CRITICAL: Use <ol><li><strong>Service Variation Process</strong></li></ol> NOT "1. **Service Variation Process**"
-- Always end responses with 2-4 specific actionable suggestions in an ordered list format
+- Keep list items compact with minimal spacing
 
 Document Analysis:
 - Refer to the contract as the ED19024 contract
@@ -153,9 +151,8 @@ Conversation Continuity:
 - Track the user's primary objectives throughout the session
 - Maintain context about their specific legal situation or document type
 
-ACTION_REQUIREMENT = 
-    MANDATORY: Always end responses with "What would you like to do next?" 
-    followed by 2-4 specific, actionable suggestions in an ordered list format using <ol> and <li> tags.
+MANDATORY ENDING:
+Always end responses with "What would you like to do next?" followed by 2-4 specific, actionable suggestions in an ordered list format using <ol> and <li> tags.
 
 I'm here to help you understand ED19024. Let me analyze the provided context and answer your question thoughtfully."""
 
@@ -1012,6 +1009,38 @@ Let me help you understand this: [/INST]"""
             )
             answer = response['message']['content']
         
+        # Post-process the response to clean up any remaining markdown
+        def clean_markdown(text):
+            """Clean up any remaining markdown in the response"""
+            import re
+            
+            # Replace markdown bold with HTML strong
+            text = re.sub(r'\*\*(.*?)\*\*', r'<strong>\1</strong>', text)
+            
+            # Replace markdown italic with HTML em
+            text = re.sub(r'\*(.*?)\*', r'<em>\1</em>', text)
+            
+            # Replace markdown headings with HTML headings
+            text = re.sub(r'^### (.*?)$', r'<h3>\1</h3>', text, flags=re.MULTILINE)
+            text = re.sub(r'^## (.*?)$', r'<h2>\1</h2>', text, flags=re.MULTILINE)
+            text = re.sub(r'^# (.*?)$', r'<h1>\1</h1>', text, flags=re.MULTILINE)
+            
+            # Replace markdown lists with HTML lists
+            text = re.sub(r'^- (.*?)$', r'<ul><li>\1</li></ul>', text, flags=re.MULTILINE)
+            text = re.sub(r'^\d+\. (.*?)$', r'<ol><li>\1</li></ol>', text, flags=re.MULTILINE)
+            
+            # Remove markdown code fences
+            text = re.sub(r'```.*?```', '', text, flags=re.DOTALL)
+            text = re.sub(r'`(.*?)`', r'<code>\1</code>', text)
+            
+            # Remove any remaining markdown symbols
+            text = re.sub(r'[|~=]+', '', text)
+            
+            return text
+        
+        # Clean the response
+        cleaned_answer = clean_markdown(answer)
+        
         # Prepare sources
         sources = []
         for metadata in results['metadatas'][0]:
@@ -1019,7 +1048,7 @@ Let me help you understand this: [/INST]"""
             sources.append(section_info)
         
         return jsonify({
-            'response': answer,
+            'response': cleaned_answer,
             'sources': sources
         })
         
