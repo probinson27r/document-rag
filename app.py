@@ -1900,11 +1900,26 @@ def export_to_pdf():
     """Export AI response to PDF format"""
     try:
         data = request.get_json()
-        if not data or 'response' not in data:
+        if not data:
+            return jsonify({'error': 'Response data is required'}), 400
+        
+        # Handle both single response and multiple responses
+        if 'response' in data:
+            # Single response
+            export_data = {
+                'response': data['response'],
+                'sources': data.get('sources', [])
+            }
+        elif 'responses' in data:
+            # Multiple responses
+            export_data = {
+                'responses': data['responses']
+            }
+        else:
             return jsonify({'error': 'Response data is required'}), 400
         
         # Generate PDF
-        pdf_content = export_manager.export_to_pdf(data)
+        pdf_content = export_manager.export_to_pdf(export_data)
         filename = export_manager.get_export_filename('pdf')
         
         @after_this_request
@@ -1929,11 +1944,26 @@ def export_to_word():
     """Export AI response to Word format"""
     try:
         data = request.get_json()
-        if not data or 'response' not in data:
+        if not data:
+            return jsonify({'error': 'Response data is required'}), 400
+        
+        # Handle both single response and multiple responses
+        if 'response' in data:
+            # Single response
+            export_data = {
+                'response': data['response'],
+                'sources': data.get('sources', [])
+            }
+        elif 'responses' in data:
+            # Multiple responses
+            export_data = {
+                'responses': data['responses']
+            }
+        else:
             return jsonify({'error': 'Response data is required'}), 400
         
         # Generate Word document
-        docx_content = export_manager.export_to_word(data)
+        docx_content = export_manager.export_to_word(export_data)
         filename = export_manager.get_export_filename('docx')
         
         @after_this_request

@@ -684,6 +684,47 @@
         .notification.info {
             background-color: #3b82f6;
         }
+
+        /* Export Buttons */
+        .message-export-buttons {
+            display: flex;
+            gap: 8px;
+            margin-top: 12px;
+            padding-top: 8px;
+            border-top: 1px solid #e5e5e5;
+        }
+
+        .export-btn {
+            padding: 6px 12px;
+            border: 1px solid #d1d5db;
+            border-radius: 6px;
+            background: #ffffff;
+            color: #374151;
+            font-size: 12px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .export-btn:hover {
+            background: #f3f4f6;
+            border-color: #9ca3af;
+        }
+
+        .export-pdf-btn:hover {
+            background: #fef2f2;
+            border-color: #ef4444;
+            color: #dc2626;
+        }
+
+        .export-word-btn:hover {
+            background: #eff6ff;
+            border-color: #3b82f6;
+            color: #2563eb;
+        }
     </style>
 </head>
 <body>
@@ -879,12 +920,28 @@
                 `;
             }
 
+            // Add export buttons for assistant messages
+            let exportButtonsHtml = '';
+            if (role === 'assistant') {
+                exportButtonsHtml = `
+                    <div class="message-export-buttons">
+                        <button class="export-btn export-pdf-btn" onclick="exportResponseToPdf('${escapeHtml(content)}', ${JSON.stringify(sources).replace(/"/g, '&quot;')})">
+                            📄 PDF
+                        </button>
+                        <button class="export-btn export-word-btn" onclick="exportResponseToWord('${escapeHtml(content)}', ${JSON.stringify(sources).replace(/"/g, '&quot;')})">
+                            📝 Word
+                        </button>
+                    </div>
+                `;
+            }
+
             messageDiv.innerHTML = `
                 <div class="message-avatar ${avatarClass}">${avatar}</div>
                 <div class="message-content">
                     <div class="message-bubble">
                         <div class="message-text">${formatMessage(content)}</div>
                         ${sourcesHtml}
+                        ${exportButtonsHtml}
                     </div>
                 </div>
             `;
@@ -948,13 +1005,12 @@
         }
 
         async function exportToPdf() {
-            // Get the last assistant message
-            const lastAssistantMessage = conversationHistory
-                .filter(msg => msg.role === 'assistant')
-                .pop();
+            // Get all assistant messages from chat history
+            const assistantMessages = conversationHistory
+                .filter(msg => msg.role === 'assistant');
             
-            if (!lastAssistantMessage) {
-                showNotification('No AI response to export', 'error');
+            if (assistantMessages.length === 0) {
+                showNotification('No AI responses to export', 'error');
                 return;
             }
             
@@ -965,8 +1021,10 @@
                         'Content-Type': 'application/json',
                     },
                     body: JSON.stringify({
-                        response: lastAssistantMessage.content,
-                        sources: lastAssistantMessage.sources || []
+                        responses: assistantMessages.map(msg => ({
+                            content: msg.content,
+                            sources: msg.sources || []
+                        }))
                     })
                 });
                 
@@ -990,13 +1048,12 @@
         }
 
         async function exportToWord() {
-            // Get the last assistant message
-            const lastAssistantMessage = conversationHistory
-                .filter(msg => msg.role === 'assistant')
-                .pop();
+            // Get all assistant messages from chat history
+            const assistantMessages = conversationHistory
+                .filter(msg => msg.role === 'assistant');
             
-            if (!lastAssistantMessage) {
-                showNotification('No AI response to export', 'error');
+            if (assistantMessages.length === 0) {
+                showNotification('No AI responses to export', 'error');
                 return;
             }
             
@@ -1007,8 +1064,75 @@
                         'Content-Type': 'application/json',
                     },
                     body: JSON.stringify({
-                        response: lastAssistantMessage.content,
-                        sources: lastAssistantMessage.sources || []
+                        responses: assistantMessages.map(msg => ({
+                            content: msg.content,
+                            sources: msg.sources || []
+                        }))
+                    })
+                });
+                
+                if (response.ok) {
+                    const blob = await response.blob();
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `ai-response-${new Date().toISOString().split('T')[0]}.docx`;
+                    a.click();
+                    URL.revokeObjectURL(url);
+                    showNotification('Word document exported successfully', 'success');
+                } else {
+                    const error = await response.json();
+                    showNotification(`Export failed: ${error.error}`, 'error');
+                }
+            } catch (error) {
+                console.error('Export error:', error);
+                showNotification('Export failed', 'error');
+            }
+        }
+
+        // Individual response export functions
+        async function exportResponseToPdf(content, sources) {
+            try {
+                const response = await fetch('/api/export/pdf', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        response: content,
+                        sources: sources || []
+                    })
+                });
+                
+                if (response.ok) {
+                    const blob = await response.blob();
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `ai-response-${new Date().toISOString().split('T')[0]}.pdf`;
+                    a.click();
+                    URL.revokeObjectURL(url);
+                    showNotification('PDF exported successfully', 'success');
+                } else {
+                    const error = await response.json();
+                    showNotification(`Export failed: ${error.error}`, 'error');
+                }
+            } catch (error) {
+                console.error('Export error:', error);
+                showNotification('Export failed', 'error');
+            }
+        }
+
+        async function exportResponseToWord(content, sources) {
+            try {
+                const response = await fetch('/api/export/word', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        response: content,
+                        sources: sources || []
                     })
                 });
                 
