@@ -11,6 +11,7 @@ protobuf==4.24.4
 PyMuPDF
 PyPDF2
 python-docx
+reportlab
 requests
 sentence-transformers
 boto3

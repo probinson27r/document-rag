@@ -19,6 +19,7 @@ import threading
 import time
 import uuid
 from cognito_auth import require_auth, get_login_url, get_logout_url, exchange_code_for_tokens, get_user_info
+from export_utils import ExportManager
 
 # Load environment variables from .env.local
 try:
@@ -1889,6 +1890,67 @@ def serve_latest_contract():
         return send_file(os.path.join(upload_dir, latest_file), mimetype='application/pdf')
     except Exception as e:
         return f"Error: {e}", 500
+
+# Initialize export manager
+export_manager = ExportManager()
+
+@app.route('/api/export/pdf', methods=['POST'])
+@require_auth
+def export_to_pdf():
+    """Export AI response to PDF format"""
+    try:
+        data = request.get_json()
+        if not data or 'response' not in data:
+            return jsonify({'error': 'Response data is required'}), 400
+        
+        # Generate PDF
+        pdf_content = export_manager.export_to_pdf(data)
+        filename = export_manager.get_export_filename('pdf')
+        
+        @after_this_request
+        def add_header(response):
+            response.headers['Content-Disposition'] = f'attachment; filename="{filename}"'
+            return response
+        
+        return send_file(
+            io.BytesIO(pdf_content),
+            mimetype='application/pdf',
+            as_attachment=True,
+            download_name=filename
+        )
+        
+    except Exception as e:
+        logger.error(f"Error exporting to PDF: {e}")
+        return jsonify({'error': f'Failed to export PDF: {str(e)}'}), 500
+
+@app.route('/api/export/word', methods=['POST'])
+@require_auth
+def export_to_word():
+    """Export AI response to Word format"""
+    try:
+        data = request.get_json()
+        if not data or 'response' not in data:
+            return jsonify({'error': 'Response data is required'}), 400
+        
+        # Generate Word document
+        docx_content = export_manager.export_to_word(data)
+        filename = export_manager.get_export_filename('docx')
+        
+        @after_this_request
+        def add_header(response):
+            response.headers['Content-Disposition'] = f'attachment; filename="{filename}"'
+            return response
+        
+        return send_file(
+            io.BytesIO(docx_content),
+            mimetype='application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            as_attachment=True,
+            download_name=filename
+        )
+        
+    except Exception as e:
+        logger.error(f"Error exporting to Word: {e}")
+        return jsonify({'error': f'Failed to export Word document: {str(e)}'}), 500
 
 if __name__ == '__main__':
     # Initialize the RAG system

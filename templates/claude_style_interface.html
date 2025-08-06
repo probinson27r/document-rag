@@ -657,6 +657,33 @@
                 opacity: 1;
             }
         }
+
+        /* Notification Styles */
+        .notification {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 12px 16px;
+            border-radius: 8px;
+            color: white;
+            font-size: 14px;
+            font-weight: 500;
+            z-index: 1000;
+            animation: slideIn 0.3s ease-out;
+            max-width: 300px;
+        }
+
+        .notification.success {
+            background-color: #10b981;
+        }
+
+        .notification.error {
+            background-color: #ef4444;
+        }
+
+        .notification.info {
+            background-color: #3b82f6;
+        }
     </style>
 </head>
 <body>
@@ -685,6 +712,8 @@
                                     <div class="chat-actions">
                         <button class="btn" id="clearChatBtn">Clear Chat</button>
                         <button class="btn" id="exportChatBtn">Export</button>
+                        <button class="btn" id="exportPdfBtn">PDF</button>
+                        <button class="btn" id="exportWordBtn">Word</button>
                         <button class="btn" id="logoutBtn">Logout</button>
                     </div>
             </div>
@@ -730,6 +759,8 @@
         const elements = {
             clearChatBtn: document.getElementById('clearChatBtn'),
             exportChatBtn: document.getElementById('exportChatBtn'),
+            exportPdfBtn: document.getElementById('exportPdfBtn'),
+            exportWordBtn: document.getElementById('exportWordBtn'),
             logoutBtn: document.getElementById('logoutBtn'),
             messagesContainer: document.getElementById('messagesContainer'),
             welcomeMessage: document.getElementById('welcomeMessage'),
@@ -755,6 +786,8 @@
             elements.messageInput.addEventListener('keydown', handleKeyDown);
             elements.clearChatBtn.addEventListener('click', clearChat);
             elements.exportChatBtn.addEventListener('click', exportChat);
+            elements.exportPdfBtn.addEventListener('click', exportToPdf);
+            elements.exportWordBtn.addEventListener('click', exportToWord);
             elements.logoutBtn.addEventListener('click', logout);
 
             // Auto-resize textarea
@@ -912,6 +945,90 @@
             a.download = `chat-export-${new Date().toISOString().split('T')[0]}.json`;
             a.click();
             URL.revokeObjectURL(url);
+        }
+
+        async function exportToPdf() {
+            // Get the last assistant message
+            const lastAssistantMessage = conversationHistory
+                .filter(msg => msg.role === 'assistant')
+                .pop();
+            
+            if (!lastAssistantMessage) {
+                showNotification('No AI response to export', 'error');
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/export/pdf', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        response: lastAssistantMessage.content,
+                        sources: lastAssistantMessage.sources || []
+                    })
+                });
+                
+                if (response.ok) {
+                    const blob = await response.blob();
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `ai-response-${new Date().toISOString().split('T')[0]}.pdf`;
+                    a.click();
+                    URL.revokeObjectURL(url);
+                    showNotification('PDF exported successfully', 'success');
+                } else {
+                    const error = await response.json();
+                    showNotification(`Export failed: ${error.error}`, 'error');
+                }
+            } catch (error) {
+                console.error('Export error:', error);
+                showNotification('Export failed', 'error');
+            }
+        }
+
+        async function exportToWord() {
+            // Get the last assistant message
+            const lastAssistantMessage = conversationHistory
+                .filter(msg => msg.role === 'assistant')
+                .pop();
+            
+            if (!lastAssistantMessage) {
+                showNotification('No AI response to export', 'error');
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/export/word', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        response: lastAssistantMessage.content,
+                        sources: lastAssistantMessage.sources || []
+                    })
+                });
+                
+                if (response.ok) {
+                    const blob = await response.blob();
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `ai-response-${new Date().toISOString().split('T')[0]}.docx`;
+                    a.click();
+                    URL.revokeObjectURL(url);
+                    showNotification('Word document exported successfully', 'success');
+                } else {
+                    const error = await response.json();
+                    showNotification(`Export failed: ${error.error}`, 'error');
+                }
+            } catch (error) {
+                console.error('Export error:', error);
+                showNotification('Export failed', 'error');
+            }
         }
 
         function logout() {
