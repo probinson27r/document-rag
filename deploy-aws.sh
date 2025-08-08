@@ -208,14 +208,6 @@ if [ "$EXISTING_SG" = "None" ] || [ -z "$EXISTING_SG" ]; then
         --cidr 0.0.0.0/0 \
         --region $AWS_REGION
     
-    # Add inbound rule for HTTPS
-    aws ec2 authorize-security-group-ingress \
-        --group-id $ALB_SG_ID \
-        --protocol tcp \
-        --port 443 \
-        --cidr 0.0.0.0/0 \
-        --region $AWS_REGION
-    
     echo "✅ Created security group: $ALB_SG_ID"
 else
     ALB_SG_ID=$EXISTING_SG

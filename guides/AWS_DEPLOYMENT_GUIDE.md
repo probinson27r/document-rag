@@ -97,7 +97,7 @@ The deployment automatically creates a complete ALB setup:
 - **Unhealthy Threshold**: 2 consecutive checks
 
 ### **Security Groups**
-- **ALB Security Group**: Allows HTTP (80) and HTTPS (443) from anywhere
+- **ALB Security Group**: Allows HTTP (80) from anywhere
 - **ECS Security Group**: Allows traffic on port 5001 only from ALB
 
 ### **Accessing Your Application**
@@ -186,6 +186,8 @@ aws secretsmanager list-secrets --region ap-southeast-2 --query 'SecretList[?con
 aws secretsmanager get-secret-value --secret-id legal-rag/secret-key --region ap-southeast-2
 ```
 
+
+
 ### **Debug Commands**
 ```bash
 # Check all resources in one command
@@ -223,14 +225,14 @@ This will remove:
 ## 🔒 **Security Considerations**
 
 ### **Production Security**
-- **HTTPS**: Add SSL certificate for HTTPS
+- **HTTPS**: Consider adding SSL certificate with AWS Certificate Manager (ACM) for production
 - **WAF**: Consider AWS WAF for additional protection
 - **VPC**: Use private subnets for ECS tasks
 - **IAM**: Use least privilege IAM roles
 - **Secrets**: Rotate secrets regularly
 
 ### **Network Security**
-- **ALB Security Group**: Only allows HTTP/HTTPS
+- **ALB Security Group**: Only allows HTTP
 - **ECS Security Group**: Only allows traffic from ALB
 - **No Direct Access**: ECS tasks are not directly accessible
 

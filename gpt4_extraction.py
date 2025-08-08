@@ -70,7 +70,7 @@ class GPT4Extractor:
     def extract_with_gpt4(self, 
                          text: str, 
                          extraction_prompt: str,
-                         model: str = "gpt-4o",
+                         model: str = "gpt-5",
                          max_tokens: int = 4000,
                          prefer_private_gpt4: bool = True) -> Dict[str, Any]:
         """
@@ -91,7 +91,7 @@ class GPT4Extractor:
             if prefer_private_gpt4 and self.private_gpt4_url and self.private_gpt4_key:
                 logger.info("Using Private GPT-4 for extraction")
                 return self._extract_with_private_gpt4(text, extraction_prompt, model, max_tokens)
-            elif model.startswith("gpt-4") and self.openai_client:
+            elif model.startswith("gpt-") and self.openai_client:
                 return self._extract_with_openai(text, extraction_prompt, model, max_tokens)
             elif model.startswith("claude") and self.claude_client:
                 return self._extract_with_claude(text, extraction_prompt, model, max_tokens)
@@ -276,7 +276,7 @@ class GPT4Extractor:
         }}
         """
         
-        return self.extract_with_gpt4(raw_text, prompt, "gpt-4o", prefer_private_gpt4=prefer_private_gpt4)
+        return self.extract_with_gpt4(raw_text, prompt, "gpt-5", prefer_private_gpt4=prefer_private_gpt4)
     
     def extract_structured_data(self, text: str, data_types: List[str], prefer_private_gpt4: bool = True) -> Dict[str, Any]:
         """
@@ -332,7 +332,7 @@ class GPT4Extractor:
         Only include the data types that were requested: {data_types}
         """
         
-        return self.extract_with_gpt4(text, prompt, "gpt-4o", prefer_private_gpt4=prefer_private_gpt4)
+        return self.extract_with_gpt4(text, prompt, "gpt-5", prefer_private_gpt4=prefer_private_gpt4)
     
     def generate_document_summary(self, text: str, summary_type: str = "comprehensive", prefer_private_gpt4: bool = True) -> Dict[str, Any]:
         """
@@ -367,7 +367,7 @@ class GPT4Extractor:
         }}
         """
         
-        return self.extract_with_gpt4(text, prompt, "gpt-4o", prefer_private_gpt4=prefer_private_gpt4)
+        return self.extract_with_gpt4(text, prompt, "gpt-5", prefer_private_gpt4=prefer_private_gpt4)
     
     def extract_legal_contract_data(self, text: str, prefer_private_gpt4: bool = True) -> Dict[str, Any]:
         """
@@ -410,7 +410,7 @@ class GPT4Extractor:
         }
         """
         
-        return self.extract_with_gpt4(text, prompt, "gpt-4o", prefer_private_gpt4=prefer_private_gpt4)
+        return self.extract_with_gpt4(text, prompt, "gpt-5", prefer_private_gpt4=prefer_private_gpt4)
     
     def clean_and_format_text(self, text: str, preserve_structure: bool = True, prefer_private_gpt4: bool = True) -> Dict[str, Any]:
         """

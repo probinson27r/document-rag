@@ -88,6 +88,11 @@
             overflow-y: auto;
         }
 
+        .setting-group { margin-bottom: 16px; }
+        .setting-label { font-size: 13px; font-weight: 600; color: #374151; margin-bottom: 6px; display:block; }
+        .setting-subtle { font-size: 11px; color: #6b7280; margin-top: 4px; }
+        .range-input { width: 100%; }
+
 
 
 
@@ -934,8 +939,13 @@
                 <div class="sidebar-subtitle">DoE and LIFT Alliance Contact Assistant</div>
             </div>
             
-                          <div class="sidebar-content">
-              </div>
+            <div class="sidebar-content">
+                <div class="setting-group">
+                    <label for="chatTemperature" class="setting-label">AI Temperature</label>
+                    <input type="range" id="chatTemperature" class="range-input" min="0" max="1" step="0.05" value="0.7" />
+                    <div class="setting-subtle">Current: <span id="chatTemperatureValue">0.70</span></div>
+                </div>
+            </div>
         </div>
 
         <!-- Main Chat Area -->
@@ -1028,6 +1038,15 @@
 
             // Auto-resize textarea
             elements.messageInput.addEventListener('input', autoResizeTextarea);
+
+            // Temperature slider
+            const tempInput = document.getElementById('chatTemperature');
+            const tempValue = document.getElementById('chatTemperatureValue');
+            if (tempInput && tempValue) {
+                tempInput.addEventListener('input', function(){ tempValue.textContent = Number(this.value).toFixed(2); });
+                tempInput.addEventListener('change', saveChatTemperature);
+                loadChatConfig();
+            }
         }
 
 
@@ -1058,7 +1077,7 @@
                 const requestBody = {
                     message: message,
                     model: 'Private GPT-4',
-                    temperature: 0.7,
+                    temperature: getCurrentTemperature(),
                     history: conversationHistory
                 };
                 
@@ -1093,6 +1112,41 @@
                 addMessage('assistant', `Sorry, I encountered an error: ${error.message}. Please try again.`);
             } finally {
                 hideTyping();
+            }
+        }
+
+        function getCurrentTemperature() {
+            const el = document.getElementById('chatTemperature');
+            const val = parseFloat(el ? el.value : '0.7');
+            return Math.max(0, Math.min(1, isNaN(val) ? 0.7 : val));
+        }
+
+        async function loadChatConfig() {
+            try {
+                const resp = await fetch('/api/chat/config');
+                const cfg = await resp.json();
+                const t = typeof cfg.temperature === 'number' ? cfg.temperature : 0.7;
+                const tempInput = document.getElementById('chatTemperature');
+                const tempValue = document.getElementById('chatTemperatureValue');
+                if (tempInput && tempValue) {
+                    tempInput.value = t;
+                    tempValue.textContent = Number(t).toFixed(2);
+                }
+            } catch (e) {
+                console.warn('Failed to load chat config');
+            }
+        }
+
+        async function saveChatTemperature() {
+            try {
+                const t = getCurrentTemperature();
+                await fetch('/api/chat/config', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ temperature: t })
+                });
+            } catch (e) {
+                console.warn('Failed to save chat temperature');
             }
         }
 

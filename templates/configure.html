@@ -123,7 +123,14 @@
         </div>
         
         <div class="section-title">Extraction Configuration</div>
-        <div class="model-section">
+        <div class="model-section" id="temperatureSection">
+            <label class="model-label" for="temperatureInput">AI Temperature (0.0 = deterministic, 1.0 = creative)</label>
+            <input id="temperatureInput" type="range" min="0" max="1" step="0.05" value="0.7" class="model-select" style="padding:0;height:32px;">
+            <div style="font-size: 11px; color: #6b7280; margin-top: 4px;">
+                Current: <span id="temperatureValue">0.7</span>
+            </div>
+        </div>
+        <div class="model-section" id="extractionMethodSection">
             <label class="model-label" for="extractionMethodSelect">Document Extraction Method</label>
             <select class="model-select" id="extractionMethodSelect">
                 <option value="auto">Auto (Best Available)</option>
@@ -135,7 +142,7 @@
             </div>
         </div>
         
-        <div class="model-section">
+        <div class="model-section" id="gpt4FeaturesSection">
             <label class="model-label">GPT-4 Extraction Features</label>
             <div style="background: #f9fafb; border-radius: 6px; padding: 12px; margin-bottom: 8px;">
                 <label style="display: flex; align-items: center; margin-bottom: 8px; font-size: 12px;">
@@ -157,7 +164,7 @@
             </div>
         </div>
         
-        <div class="model-section">
+        <div class="model-section" id="gpt4ModelSection">
             <label class="model-label" for="gpt4ModelSelect">GPT-4 Model</label>
             <select class="model-select" id="gpt4ModelSelect">
                 <option value="gpt-4o">GPT-4o (Fast & Cost-effective)</option>
@@ -166,7 +173,7 @@
             </select>
         </div>
         
-        <div class="model-section">
+        <div class="model-section" id="extractionStatusSection">
             <label class="model-label">Extraction System Status</label>
             <div id="extractionStatus" style="background: #f9fafb; border-radius: 6px; padding: 12px; font-size: 12px;">
                 <div style="display: flex; align-items: center; margin-bottom: 8px;">
@@ -251,6 +258,16 @@
     // Extraction configuration
     async function loadExtractionConfig() {
         try {
+            // Load chat (temperature) config
+            const chatCfgResp = await fetch('/api/chat/config');
+            const chatCfg = await chatCfgResp.json();
+            if (!chatCfgResp.ok) throw new Error('chat config load failed');
+            const tempInput = document.getElementById('temperatureInput');
+            const tempValue = document.getElementById('temperatureValue');
+            const t = typeof chatCfg.temperature === 'number' ? chatCfg.temperature : 0.7;
+            tempInput.value = t;
+            tempValue.textContent = Number(t).toFixed(2);
+
             const response = await fetch('/api/extraction/config');
             const data = await response.json();
             
@@ -286,12 +303,21 @@
                     document_summary: document.getElementById('enableDocumentSummary').checked
                 }
             };
+
+            // Save chat (temperature) config in parallel
+            const temp = parseFloat(document.getElementById('temperatureInput').value || '0.7');
+            const saveChatCfg = fetch('/api/chat/config', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ temperature: Math.max(0, Math.min(1, isNaN(temp) ? 0.7 : temp)) })
+            });
             
             const response = await fetch('/api/extraction/config', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(config)
             });
+            await saveChatCfg;
             
             const result = await response.json();
             if (response.ok) {
@@ -307,18 +333,19 @@
     // Update extraction method visibility based on selection
     function updateExtractionUI() {
         const extractionMethod = document.getElementById('extractionMethodSelect').value;
-        const gpt4Features = document.querySelector('.model-section:nth-child(4)');
-        const gpt4Model = document.querySelector('.model-section:nth-child(5)');
-        const statusSection = document.querySelector('.model-section:nth-child(6)');
-        
-        if (extractionMethod === 'gpt4_enhanced') {
-            gpt4Features.style.display = 'block';
-            gpt4Model.style.display = 'block';
-            statusSection.style.display = 'block';
-        } else {
-            gpt4Features.style.display = 'none';
-            gpt4Model.style.display = 'none';
-            statusSection.style.display = 'none';
+        const gpt4Features = document.getElementById('gpt4FeaturesSection');
+        const gpt4Model = document.getElementById('gpt4ModelSection');
+        const statusSection = document.getElementById('extractionStatusSection');
+        if (gpt4Features && gpt4Model && statusSection) {
+            if (extractionMethod === 'gpt4_enhanced') {
+                gpt4Features.style.display = 'block';
+                gpt4Model.style.display = 'block';
+                statusSection.style.display = 'block';
+            } else {
+                gpt4Features.style.display = 'none';
+                gpt4Model.style.display = 'none';
+                statusSection.style.display = 'none';
+            }
         }
     }
     
@@ -642,6 +669,10 @@
         updateExtractionUI();
         saveExtractionConfig();
     });
+    document.getElementById('temperatureInput').addEventListener('input', function() {
+        document.getElementById('temperatureValue').textContent = Number(this.value).toFixed(2);
+    });
+    document.getElementById('temperatureInput').addEventListener('change', saveExtractionConfig);
     
     document.getElementById('gpt4ModelSelect').addEventListener('change', saveExtractionConfig);
     

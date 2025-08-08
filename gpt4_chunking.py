@@ -62,7 +62,7 @@ class GPT4Chunker:
                                 text: str, 
                                 document_type: str = "general",
                                 preserve_structure: bool = True,
-                                model: str = "gpt-4o",
+                                 model: str = "gpt-5",
                                 prefer_private_gpt4: bool = True) -> Dict[str, Any]:
         """Chunk document using GPT-4 with intelligent semantic splitting"""
         try:
@@ -70,7 +70,7 @@ class GPT4Chunker:
             if prefer_private_gpt4 and self.private_gpt4_url and self.private_gpt4_key:
                 logger.info("Using Private GPT-4 for chunking")
                 return self._chunk_with_private_gpt4(text, document_type, preserve_structure, model)
-            elif model.startswith("gpt-4") and self.openai_client:
+            elif model.startswith("gpt-") and self.openai_client:
                 return self._chunk_with_openai(text, document_type, preserve_structure, model)
             elif model.startswith("claude") and self.claude_client:
                 return self._chunk_with_claude(text, document_type, preserve_structure, model)

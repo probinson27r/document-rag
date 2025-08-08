@@ -75,7 +75,7 @@ openai_client = None
 jan_client = None
 private_gpt4_client = None  # New private GPT-4 client
 current_model = 'Private GPT-4'  # Default to Private GPT-4
-openai_model_name = 'gpt-4o'  # Default OpenAI model name
+openai_model_name = 'gpt-5'  # Default OpenAI model name
 jan_model_name = 'gpt-4'  # Default Jan.ai model name
 private_gpt4_model_name = 'gpt-4o'  # Private GPT-4 model name
 private_gpt4_base_url = 'https://doe-srt-sensai-nprd-apim.azure-api.net/doe-srt-sensai-nprd-oai/openai/deployments/gpt-4o/chat/completions?api-version=2025-03-01-preview'
@@ -86,9 +86,10 @@ private_gpt4_url = os.getenv('PRIVATE_GPT4_URL', private_gpt4_base_url)
 # Canny.io configuration
 CANNY_API_KEY = os.getenv('CANNY_API_KEY')
 CANNY_BOARD_ID = os.getenv('CANNY_BOARD_ID')
-user_instructions = """You are Ed-AI, an AI assistant with expertise in technology, legal document analysis and ITIL. I aim to be helpful, honest, and direct while maintaining a warm, conversational tone.
+user_instructions = """You are Ed-AI, an AI assistant with expertise in technology, legal document analysis and ITIL. I aim to be helpful, honest, and direct.
 
 General Guidelines:
+- Never provide general legal advice
 - Always be positive and helpful
 - Provide a balanced and objective answer that does not bias the customer or the vendor
 - Observe and reference the supplier behaviours in section 3.3 of the contract
@@ -568,6 +569,41 @@ def claude_style_chat():
 def configure():
     return render_template('configure.html')
 
+# Chat configuration (e.g., temperature)
+@app.route('/api/chat/config', methods=['GET'])
+@require_auth
+def api_get_chat_config():
+    try:
+        default_config = {'temperature': 0.7}
+        cfg = session.get('chat_config', default_config)
+        # Ensure temperature is present and sane
+        temp = cfg.get('temperature', 0.7)
+        try:
+            temp = float(temp)
+        except Exception:
+            temp = 0.7
+        temp = max(0.0, min(1.0, temp))
+        cfg['temperature'] = temp
+        return jsonify(cfg)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/chat/config', methods=['POST'])
+@require_auth
+def api_save_chat_config():
+    try:
+        data = request.get_json() or {}
+        temp = data.get('temperature', 0.7)
+        try:
+            temp = float(temp)
+        except Exception:
+            return jsonify({'error': 'Invalid temperature'}), 400
+        temp = max(0.0, min(1.0, temp))
+        session['chat_config'] = {'temperature': temp}
+        return jsonify({'success': True, 'temperature': temp})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/upload', methods=['POST'])
 @require_auth
 def upload_file():
@@ -766,7 +802,7 @@ Let me help you understand this:"""
             )
             answer = response.content[0].text
             
-        elif current_model == 'OpenAI GPT-4' and openai_client:
+        elif current_model == 'OpenAI GPT-5' and openai_client:
             # Use OpenAI API with user instructions
             prompt = f"""{user_instructions}\n\nContext from the legal document:\n{context}\n\nYour question: {question}\n\nLet me help you understand this:"""
             completion = openai_client.chat.completions.create(
@@ -849,7 +885,7 @@ Let me help you understand this: [/INST]"""
             
             # Map display names to actual model names for Ollama
             ollama_model = current_model
-            if current_model in ['Claude Sonnet 4', 'OpenAI GPT-4', 'Jan.ai GPT-4', 'Private GPT-4']:
+            if current_model in ['Claude Sonnet 4', 'OpenAI GPT-5', 'Jan.ai GPT-4', 'Private GPT-4']:
                 ollama_model = 'mistral:7b'  # Fallback to local model if external APIs not available
             
             response = ollama_client.chat(
@@ -883,7 +919,14 @@ def chat_endpoint():
         data = request.get_json()
         message = data.get('message', '').strip()
         model = data.get('model', current_model)
-        temperature = data.get('temperature', 0.7)
+        # Temperature: prefer configured value if not provided
+        chat_cfg = session.get('chat_config', {})
+        temperature = data.get('temperature', chat_cfg.get('temperature', 0.7))
+        try:
+            temperature = float(temperature)
+        except Exception:
+            temperature = 0.7
+        temperature = max(0.0, min(1.0, temperature))
         history = data.get('history', [])
         
         if not message:
@@ -926,7 +969,7 @@ Let me help you understand this:"""
             )
             answer = response.content[0].text
             
-        elif model == 'OpenAI GPT-4' and openai_client:
+        elif model == 'OpenAI GPT-5' and openai_client:
             # Use OpenAI API with user instructions
             completion = openai_client.chat.completions.create(
                 model=openai_model_name,
@@ -1009,7 +1052,7 @@ Let me help you understand this: [/INST]"""
             
             # Map display names to actual model names for Ollama
             ollama_model = model
-            if model in ['Claude Sonnet 4', 'OpenAI GPT-4', 'Jan.ai GPT-4', 'Private GPT-4']:
+            if model in ['Claude Sonnet 4', 'OpenAI GPT-5', 'Jan.ai GPT-4', 'Private GPT-4']:
                 ollama_model = 'mistral:7b'  # Fallback to local model if external APIs not available
             
             response = ollama_client.chat(
@@ -1072,6 +1115,18 @@ def health_check():
     """Simple health check endpoint (no auth required)"""
     return jsonify({'status': 'healthy', 'timestamp': datetime.now().isoformat()})
 
+@app.route('/debug/env')
+def debug_env():
+    """Debug endpoint to check environment variables (no auth required)"""
+    return jsonify({
+        'canny_api_key_set': bool(os.getenv('CANNY_API_KEY')),
+        'canny_board_id_set': bool(os.getenv('CANNY_BOARD_ID')),
+        'canny_api_key_length': len(os.getenv('CANNY_API_KEY', '')),
+        'canny_board_id_length': len(os.getenv('CANNY_BOARD_ID', '')),
+        'canny_api_key_preview': os.getenv('CANNY_API_KEY', '')[:10] + '...' if os.getenv('CANNY_API_KEY') else 'Not set',
+        'canny_board_id_preview': os.getenv('CANNY_BOARD_ID', '')[:10] + '...' if os.getenv('CANNY_BOARD_ID') else 'Not set'
+    })
+
 @app.route('/api/status')
 @require_auth
 def api_status():
@@ -1098,7 +1153,7 @@ def api_models():
         if claude_client:
             available_models.append('Claude Sonnet 4')
         if openai_client:
-            available_models.append('OpenAI GPT-4')
+            available_models.append('OpenAI GPT-5')
         if jan_client:
             available_models.append('Jan.ai GPT-4')
         if private_gpt4_client:
@@ -1134,7 +1189,7 @@ def switch_model():
         if claude_client:
             available_models.append('Claude Sonnet 4')
         if openai_client:
-            available_models.append('OpenAI GPT-4')
+            available_models.append('OpenAI GPT-5')
         if jan_client:
             available_models.append('Jan.ai GPT-4')
         if private_gpt4_client:
