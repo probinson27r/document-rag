@@ -1,20 +1,21 @@
 #!/bin/bash
 
 # Fix Health Check Script for Legal Document RAG System
-# This script updates the task definition to use the correct health check endpoint
+# This script fixes the ECS task definition health check to use the correct endpoint
 
 set -e
 
 # Configuration
 AWS_REGION="ap-southeast-2"
 AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-ECR_REPOSITORY_NAME="legal-document-rag"
-IMAGE_TAG="latest"
 CLUSTER_NAME="legal-rag-cluster"
 SERVICE_NAME="legal-rag-service"
 TASK_DEFINITION_NAME="legal-rag-task"
+ECR_REPOSITORY_NAME="legal-document-rag"
+IMAGE_TAG="latest"
+ECR_URI="$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY_NAME"
 
-echo "🔧 Fixing health check for Legal Document RAG System..."
+echo "🔧 Fixing ECS task definition health check..."
 
 # Check if AWS CLI is configured
 if ! aws sts get-caller-identity > /dev/null 2>&1; then
@@ -22,14 +23,9 @@ if ! aws sts get-caller-identity > /dev/null 2>&1; then
     exit 1
 fi
 
-# Get ECR URI
-ECR_URI="$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY_NAME"
-
-echo "📋 Using ECR Image: $ECR_URI:$IMAGE_TAG"
-
 # Create new task definition with correct health check
-echo "📝 Creating new task definition with correct health check..."
-cat > task-definition-fixed.json << EOF
+echo "📝 Creating new task definition with corrected health check..."
+cat > task-definition-fix.json << EOF
 {
     "family": "$TASK_DEFINITION_NAME",
     "networkMode": "awsvpc",
@@ -56,19 +52,19 @@ cat > task-definition-fixed.json << EOF
             "secrets": [
                 {
                     "name": "SECRET_KEY",
-                    "valueFrom": "arn:aws:secretsmanager:ap-southeast-2:$AWS_ACCOUNT_ID:secret:legal-rag/secret-key"
+                    "valueFrom": "arn:aws:secretsmanager:$AWS_REGION:$AWS_ACCOUNT_ID:secret:legal-rag/secret-key"
                 },
                 {
                     "name": "ANTHROPIC_API_KEY",
-                    "valueFrom": "arn:aws:secretsmanager:ap-southeast-2:$AWS_ACCOUNT_ID:secret:legal-rag/anthropic-api-key"
+                    "valueFrom": "arn:aws:secretsmanager:$AWS_REGION:$AWS_ACCOUNT_ID:secret:legal-rag/anthropic-api-key"
                 },
                 {
                     "name": "OPENAI_API_KEY",
-                    "valueFrom": "arn:aws:secretsmanager:ap-southeast-2:$AWS_ACCOUNT_ID:secret:legal-rag/openai-api-key"
+                    "valueFrom": "arn:aws:secretsmanager:$AWS_REGION:$AWS_ACCOUNT_ID:secret:legal-rag/openai-api-key"
                 },
                 {
                     "name": "PRIVATE_GPT4_API_KEY",
-                    "valueFrom": "arn:aws:secretsmanager:ap-southeast-2:$AWS_ACCOUNT_ID:secret:legal-rag/private-gpt4-api-key"
+                    "valueFrom": "arn:aws:secretsmanager:$AWS_REGION:$AWS_ACCOUNT_ID:secret:legal-rag/private-gpt4-api-key"
                 }
             ],
             "logConfiguration": {
@@ -93,80 +89,45 @@ EOF
 
 # Register new task definition
 echo "📋 Registering new task definition..."
-NEW_REVISION=$(aws ecs register-task-definition --cli-input-json file://task-definition-fixed.json --region $AWS_REGION --query 'taskDefinition.revision' --output text)
+NEW_REVISION=$(aws ecs register-task-definition --cli-input-json file://task-definition-fix.json --region $AWS_REGION --query 'taskDefinition.revision' --output text)
 
 echo "✅ New task definition registered: revision $NEW_REVISION"
 
-# Update ECS service with new task definition
-echo "🔄 Updating ECS service..."
+# Update service to use new task definition
+echo "🔄 Updating service to use new task definition..."
 aws ecs update-service \
     --cluster $CLUSTER_NAME \
     --service $SERVICE_NAME \
     --task-definition $TASK_DEFINITION_NAME:$NEW_REVISION \
+    --desired-count 1 \
     --region $AWS_REGION
 
-echo "✅ ECS service updated successfully!"
+echo "✅ Service update initiated!"
 
-# Wait for service to stabilize
-echo "⏳ Waiting for service to stabilize..."
+# Wait for the deployment to complete
+echo "⏳ Waiting for deployment to complete..."
 aws ecs wait services-stable \
     --cluster $CLUSTER_NAME \
     --services $SERVICE_NAME \
     --region $AWS_REGION
 
-echo "✅ Service is stable!"
+echo "🎉 Health check fix completed successfully!"
 
-# Get service details
-echo "📊 Getting service details..."
-SERVICE_DETAILS=$(aws ecs describe-services --cluster $CLUSTER_NAME --services $SERVICE_NAME --region $AWS_REGION)
+# Get service status
+echo "📊 Service status:"
+aws ecs describe-services \
+    --cluster $CLUSTER_NAME \
+    --services $SERVICE_NAME \
+    --region $AWS_REGION \
+    --query 'services[0].{ServiceName:serviceName,Status:status,DesiredCount:desiredCount,RunningCount:runningCount,PendingCount:pendingCount}' \
+    --output table
 
-# Check if service is running
-RUNNING_COUNT=$(echo "$SERVICE_DETAILS" | jq -r '.services[0].runningCount')
-DESIRED_COUNT=$(echo "$SERVICE_DETAILS" | jq -r '.services[0].desiredCount')
-
-echo "📈 Service Status:"
-echo "- Running tasks: $RUNNING_COUNT"
-echo "- Desired tasks: $DESIRED_COUNT"
-
-if [ "$RUNNING_COUNT" -eq "$DESIRED_COUNT" ] && [ "$RUNNING_COUNT" -gt 0 ]; then
-    echo "✅ Service is running successfully!"
-else
-    echo "⚠️ Service may not be fully running. Check AWS Console for details."
-fi
-
-# Get service URL
-echo "🌍 Getting service URL..."
-ALB_DNS=$(aws elbv2 describe-load-balancers --names "legal-rag-alb" --region $AWS_REGION --query 'LoadBalancers[0].DNSName' --output text 2>/dev/null || echo "Load balancer not found")
-
-echo ""
-echo "🎉 Health check fix completed!"
-echo ""
-echo "📋 Deployment Summary:"
-echo "- Task Definition: $TASK_DEFINITION_NAME (revision $NEW_REVISION)"
-echo "- ECS Service: $SERVICE_NAME"
-echo "- Cluster: $CLUSTER_NAME"
-echo "- Image: $ECR_URI:$IMAGE_TAG"
-echo "- Running Tasks: $RUNNING_COUNT/$DESIRED_COUNT"
-echo "- Health Check Endpoint: /health (no auth required)"
-echo ""
-
-if [ "$ALB_DNS" != "Load balancer not found" ]; then
-    echo "🌍 Application URL: http://$ALB_DNS"
-    echo "🏥 Health Check: http://$ALB_DNS/health"
-    echo "📊 Status Check: http://$ALB_DNS/api/status (requires auth)"
-    echo ""
-    echo "💡 Test the health check endpoint to ensure it's working correctly."
-else
-    echo "⚠️ Load balancer not found. Check your deployment configuration."
-fi
+# Clean up
+rm -f task-definition-fix.json
 
 echo ""
 echo "🔗 Useful AWS Console links:"
 echo "- ECS Cluster: https://console.aws.amazon.com/ecs/home?region=$AWS_REGION#/clusters/$CLUSTER_NAME"
 echo "- ECS Service: https://console.aws.amazon.com/ecs/home?region=$AWS_REGION#/clusters/$CLUSTER_NAME/services/$SERVICE_NAME"
-echo "- ECR Repository: https://console.aws.amazon.com/ecr/repositories/$ECR_REPOSITORY_NAME?region=$AWS_REGION"
 echo ""
-echo "💡 Next steps:"
-echo "1. Test the health check at http://$ALB_DNS/health"
-echo "2. Check the service logs in CloudWatch"
-echo "3. Monitor the service health in AWS Console" 
+echo "✅ Health check fix completed!" 

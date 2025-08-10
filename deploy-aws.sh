@@ -30,9 +30,9 @@ aws ecr create-repository --repository-name $ECR_REPOSITORY_NAME --region $AWS_R
 echo "🔐 Logging into ECR..."
 aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
 
-# Build Docker image
-echo "🔨 Building Docker image..."
-docker build -t $ECR_REPOSITORY_NAME:$IMAGE_TAG .
+# Build Docker image for ECS (linux/amd64 platform)
+echo "🔨 Building Docker image for ECS (linux/amd64)..."
+docker buildx build --platform linux/amd64 -t $ECR_REPOSITORY_NAME:$IMAGE_TAG .
 
 # Tag image for ECR
 ECR_URI="$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY_NAME"

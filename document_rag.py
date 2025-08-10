@@ -615,8 +615,14 @@ class DocumentRAG:
             separators=["\n\n", "\n", " ", ""]
         )
         
-        # Initialize ChromaDB
-        self.chroma_client = chromadb.PersistentClient(path=chroma_db_path)
+        # Initialize ChromaDB with same settings as Flask app
+        self.chroma_client = chromadb.PersistentClient(
+            path=chroma_db_path,
+            settings=chromadb.config.Settings(
+                anonymized_telemetry=False,
+                allow_reset=True
+            )
+        )
         self.collection = self.chroma_client.get_or_create_collection(
             name="documents",
             metadata={"hnsw:space": "cosine"}
@@ -896,7 +902,53 @@ RESPONSE FORMAT:
         return results
     
     def search_documents(self, query: str, n_results: int = 5) -> List[Dict]:
-        """Search for relevant document chunks"""
+        """Search for relevant document chunks using hybrid search"""
+        try:
+            # Import hybrid search
+            from hybrid_search import HybridSearch
+            
+            # Initialize hybrid search
+            hybrid_search = HybridSearch(
+                chroma_path=self.chroma_db_path,
+                collection_name=self.collection.name
+            )
+            
+            # Use hybrid search with fallback
+            hybrid_results = hybrid_search.search_with_fallback(query, n_results)
+            
+            # Convert to expected format
+            search_results = []
+            for result in hybrid_results:
+                # Get metadata from the original collection
+                metadata_result = self.collection.get(
+                    ids=[result['id']],
+                    include=['metadatas']
+                )
+                
+                metadata = metadata_result['metadatas'][0] if metadata_result['metadatas'] else {}
+                
+                search_results.append({
+                    'id': result['id'],
+                    'document': result['text'],
+                    'metadata': metadata,
+                    'distance': result['distance'],
+                    'search_type': result.get('search_type', 'unknown'),
+                    'combined_score': result.get('combined_score', 1.0 - result['distance'])
+                })
+            
+            return search_results
+            
+        except ImportError:
+            # Fallback to original search if hybrid_search module not available
+            print("Warning: Hybrid search not available, using original search")
+            return self._original_search_documents(query, n_results)
+        except Exception as e:
+            print(f"Error in hybrid search: {e}")
+            # Fallback to original search
+            return self._original_search_documents(query, n_results)
+    
+    def _original_search_documents(self, query: str, n_results: int = 5) -> List[Dict]:
+        """Original search implementation as fallback"""
         query_embedding = self.embedding_model.encode([query]).tolist()
         
         results = self.collection.query(

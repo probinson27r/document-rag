@@ -1,3 +1,9 @@
+#!/usr/bin/env python3
+"""
+Legal Document RAG System
+A Flask-based application for processing and querying legal documents using RAG (Retrieval-Augmented Generation).
+"""
+
 import os
 import json
 import logging
@@ -22,6 +28,14 @@ import time
 import uuid
 from cognito_auth import require_auth, get_login_url, get_logout_url, exchange_code_for_tokens, get_user_info
 from export_utils import ExportManager
+import multiprocessing
+
+# Configure multiprocessing to prevent resource tracker warnings
+if __name__ == '__main__':
+    multiprocessing.set_start_method('spawn', force=True)
+
+# Suppress multiprocessing resource tracker warnings
+os.environ['PYTHONWARNINGS'] = 'ignore::UserWarning:multiprocessing.resource_tracker'
 
 # Load environment variables from .env.local
 try:
@@ -170,12 +184,39 @@ def initialize_rag_system():
     try:
         embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
         logger.info("Embedding model loaded")
-        chroma_client = chromadb.PersistentClient(path="./chroma_db")
-        collection = chroma_client.get_or_create_collection(
-            name="legal_documents",
-            metadata={"hnsw:space": "cosine"}
-        )
-        logger.info("ChromaDB initialized")
+        # Initialize ChromaDB with multiprocessing-safe settings
+        try:
+            chroma_client = chromadb.PersistentClient(
+                path="./chroma_db",
+                settings=Settings(
+                    anonymized_telemetry=False,
+                    allow_reset=True
+                )
+            )
+            collection = chroma_client.get_or_create_collection(
+                name="documents",
+                metadata={"hnsw:space": "cosine"}
+            )
+            logger.info("ChromaDB initialized")
+        except Exception as chroma_error:
+            logger.error(f"ChromaDB initialization error: {chroma_error}")
+            # Try to reset and reinitialize
+            try:
+                chroma_client = chromadb.PersistentClient(
+                    path="./chroma_db",
+                    settings=Settings(
+                        anonymized_telemetry=False,
+                        allow_reset=True
+                    )
+                )
+                collection = chroma_client.get_or_create_collection(
+                    name="documents",
+                    metadata={"hnsw:space": "cosine"}
+                )
+                logger.info("ChromaDB reinitialized successfully")
+            except Exception as retry_error:
+                logger.error(f"ChromaDB reinitialization failed: {retry_error}")
+                return False
         ollama_client = ollama.Client(host='http://localhost:11434')
         logger.info("Ollama client initialized")
         claude_api_key = os.getenv('ANTHROPIC_API_KEY')
@@ -456,6 +497,79 @@ def ingest_legal_document(file_path: str, processing_id: str = None) -> dict:
             'error': str(e)
         }
 
+def ingest_document_with_improved_chunking(file_path: str, processing_id: str = None) -> dict:
+    """Ingest a document using the improved chunking strategy that keeps section headers with content"""
+    try:
+        logger.info(f"Processing document with improved chunking: {file_path}")
+        
+        # Update progress if processing_id provided
+        def update_progress(progress, message):
+            if processing_id and processing_id in processing_status:
+                processing_status[processing_id]['progress'] = progress
+                processing_status[processing_id]['message'] = message
+        
+        update_progress(30, "Loading document with improved chunking strategy...")
+        
+        # Use the DocumentRAG class with improved chunking
+        from document_rag import DocumentRAG
+        
+        # Initialize RAG system with error handling for ChromaDB conflicts
+        try:
+            rag = DocumentRAG()
+        except Exception as chroma_error:
+            if "already exists" in str(chroma_error):
+                # If there's a ChromaDB instance conflict, try to use the existing one
+                logger.warning(f"ChromaDB instance conflict, attempting to use existing instance: {chroma_error}")
+                # Wait a moment and try again
+                import time
+                time.sleep(1)
+                rag = DocumentRAG()
+            else:
+                raise chroma_error
+        
+        update_progress(50, "Processing document with improved chunking...")
+        
+        # Process the document using the improved chunking strategy
+        result = rag.ingest_document(file_path)
+        
+        if result and "Successfully ingested" in result:
+            # Extract information from the result string
+            import re
+            chunks_match = re.search(r'(\d+) chunks', result)
+            chunks_count = int(chunks_match.group(1)) if chunks_match else 0
+            
+            # Generate document ID
+            import hashlib
+            import time
+            filename = os.path.basename(file_path)
+            file_stats = os.stat(file_path)
+            doc_hash = hashlib.md5(f"{filename}_{file_stats.st_size}_{file_stats.st_mtime}".encode()).hexdigest()[:8]
+            timestamp = int(time.time())
+            doc_id = f"{filename}_{doc_hash}_{timestamp}"
+            
+            update_progress(100, f"Document processed successfully with improved chunking. {chunks_count} chunks created.")
+            
+            return {
+                'success': True,
+                'total_chunks': chunks_count,
+                'extraction_method': 'improved_chunking',
+                'filename': filename,
+                'document_id': doc_id,
+                'message': f"Document processed successfully with improved chunking. {chunks_count} chunks created."
+            }
+        else:
+            return {
+                'success': False,
+                'error': f"Failed to process document: {result}"
+            }
+            
+    except Exception as e:
+        logger.error(f"Error processing document with improved chunking: {e}")
+        return {
+            'success': False,
+            'error': f"Processing failed: {str(e)}"
+        }
+
 @app.route('/login')
 def login():
     """Show custom login page"""
@@ -648,17 +762,31 @@ def upload_file():
                 
                 if file_extension == '.pdf':
                     processing_status[processing_id]['progress'] = 20
-                    processing_status[processing_id]['message'] = 'Processing PDF with legal document analyzer...'
                     
-                    # Use legal document processing for PDFs
-                    result = ingest_legal_document(filepath, processing_id)
+                    # Check chunking configuration
+                    try:
+                        extraction_config = session.get('extraction_config', {})
+                        chunking_config = extraction_config.get('chunking', {})
+                        use_improved_chunking = chunking_config.get('use_improved_chunking', True)
+                    except RuntimeError:
+                        # No request context, use default
+                        use_improved_chunking = True
+                    
+                    if use_improved_chunking:
+                        processing_status[processing_id]['message'] = 'Processing PDF with improved chunking strategy...'
+                        # Use improved chunking strategy for PDFs (better section retention)
+                        result = ingest_document_with_improved_chunking(filepath, processing_id)
+                    else:
+                        processing_status[processing_id]['message'] = 'Processing PDF with traditional chunking...'
+                        # Use traditional legal document processing
+                        result = ingest_legal_document(filepath, processing_id)
                     
                     if result['success']:
                         processing_status[processing_id]['progress'] = 100
-                        processing_status[processing_id]['message'] = f"Document processed successfully. {result['total_chunks']} chunks created using {result['extraction_method']}."
+                        processing_status[processing_id]['message'] = f"Document processed successfully with improved chunking. {result['total_chunks']} chunks created using {result['extraction_method']}."
                         processing_status[processing_id]['status'] = 'completed'
                         processing_status[processing_id]['result'] = {
-                            'message': f"Document uploaded and processed successfully. {result['total_chunks']} chunks created using {result['extraction_method']}.",
+                            'message': f"Document uploaded and processed successfully with improved chunking. {result['total_chunks']} chunks created using {result['extraction_method']}.",
                             'filename': result['filename'],
                             'chunks': result['total_chunks'],
                             'document_id': result.get('document_id', '')
@@ -769,19 +897,68 @@ def query():
         if not question:
             return jsonify({'error': 'No question provided'}), 400
         
-        # Search for relevant chunks
-        results = collection.query(
-            query_texts=[question],
-            n_results=5,
-            include=['documents', 'metadatas', 'distances']
-        )
-        
-        if not results['documents'] or not results['documents'][0]:
-            return jsonify({'answer': 'No relevant information found in the documents.'})
-        
-        # Prepare context from chunks
-        context_chunks = results['documents'][0]
-        context = '\n\n'.join(context_chunks)
+        # Search for relevant chunks using hybrid search
+        try:
+            from hybrid_search import HybridSearch
+            
+            # Initialize hybrid search with error handling for ChromaDB conflicts
+            try:
+                hybrid_search = HybridSearch(
+                    chroma_path='./chroma_db',
+                    collection_name='documents'
+                )
+            except Exception as chroma_error:
+                if "already exists" in str(chroma_error):
+                    # If there's a ChromaDB instance conflict, try to use the existing one
+                    logger.warning(f"ChromaDB instance conflict in hybrid search, attempting to use existing instance: {chroma_error}")
+                    # Wait a moment and try again
+                    import time
+                    time.sleep(1)
+                    hybrid_search = HybridSearch(
+                        chroma_path='./chroma_db',
+                        collection_name='documents'
+                    )
+                else:
+                    raise chroma_error
+            
+            # Use hybrid search with fallback
+            hybrid_results = hybrid_search.search_with_fallback(question, 5)
+            
+            if not hybrid_results:
+                return jsonify({'answer': 'No relevant information found in the documents.'})
+            
+            # Convert to expected format
+            context_chunks = [result['text'] for result in hybrid_results]
+            context = '\n\n'.join(context_chunks)
+            
+        except ImportError:
+            # Fallback to original search if hybrid_search module not available
+            print("Warning: Hybrid search not available, using original search")
+            results = collection.query(
+                query_texts=[question],
+                n_results=5,
+                include=['documents', 'metadatas', 'distances']
+            )
+            
+            if not results['documents'] or not results['documents'][0]:
+                return jsonify({'answer': 'No relevant information found in the documents.'})
+            
+            context_chunks = results['documents'][0]
+            context = '\n\n'.join(context_chunks)
+        except Exception as e:
+            print(f"Error in hybrid search: {e}")
+            # Fallback to original search
+            results = collection.query(
+                query_texts=[question],
+                n_results=5,
+                include=['documents', 'metadatas', 'distances']
+            )
+            
+            if not results['documents'] or not results['documents'][0]:
+                return jsonify({'answer': 'No relevant information found in the documents.'})
+            
+            context_chunks = results['documents'][0]
+            context = '\n\n'.join(context_chunks)
         
         # Generate response based on current model
         if current_model == 'Claude Sonnet 4' and claude_client:
@@ -894,13 +1071,37 @@ Let me help you understand this: [/INST]"""
             )
             answer = response['message']['content']
         
-        # Prepare sources
+        # Prepare sources based on search method used
         sources = []
-        for metadata in results['metadatas'][0]:
-            filename = metadata.get('filename', 'Unknown Document')
-            section_info = f"{metadata.get('section_number', 'Unknown')} - {metadata.get('section_title', 'Unknown')}"
-            source_info = f"{filename}: {section_info}"
-            sources.append(source_info)
+        if 'hybrid_results' in locals():
+            # Hybrid search was used
+            for result in hybrid_results:
+                # Try to get metadata if available
+                try:
+                    metadata_result = collection.get(
+                        ids=[result['id']],
+                        include=['metadatas']
+                    )
+                    if metadata_result['metadatas']:
+                        metadata = metadata_result['metadatas'][0]
+                        filename = metadata.get('filename', 'Unknown Document')
+                        section_info = f"{metadata.get('section_number', 'Unknown')} - {metadata.get('section_title', 'Unknown')}"
+                        source_info = f"{filename}: {section_info}"
+                        sources.append(source_info)
+                    else:
+                        sources.append(f"Document chunk: {result['id']}")
+                except:
+                    sources.append(f"Document chunk: {result['id']}")
+        elif 'results' in locals():
+            # Fallback search was used
+            for metadata in results['metadatas'][0]:
+                filename = metadata.get('filename', 'Unknown Document')
+                section_info = f"{metadata.get('section_number', 'Unknown')} - {metadata.get('section_title', 'Unknown')}"
+                source_info = f"{filename}: {section_info}"
+                sources.append(source_info)
+        else:
+            # No search results
+            sources = []
         
         return jsonify({
             'answer': answer,
@@ -932,22 +1133,99 @@ def chat_endpoint():
         if not message:
             return jsonify({'error': 'No message provided'}), 400
         
-        # Search for relevant chunks
-        results = collection.query(
-            query_texts=[message],
-            n_results=5,
-            include=['documents', 'metadatas', 'distances']
-        )
-        
-        if not results['documents'] or not results['documents'][0]:
-            return jsonify({
-                'response': 'No relevant information found in the documents.',
-                'sources': []
-            })
-        
-        # Prepare context from chunks
-        context_chunks = results['documents'][0]
-        context = '\n\n'.join(context_chunks)
+        # Search for relevant chunks using hybrid search
+        try:
+            from hybrid_search import HybridSearch
+            
+            # Initialize hybrid search
+            hybrid_search = HybridSearch(
+                chroma_path='./chroma_db',
+                collection_name='documents'
+            )
+            
+            # Use hybrid search with fallback
+            hybrid_results = hybrid_search.search_with_fallback(message, 5)
+            
+            if not hybrid_results:
+                return jsonify({
+                    'response': 'No relevant information found in the documents.',
+                    'sources': []
+                })
+            
+            # Convert to expected format
+            context_chunks = [result['text'] for result in hybrid_results]
+            context = '\n\n'.join(context_chunks)
+            
+            # Prepare sources from hybrid results
+            sources = []
+            for result in hybrid_results:
+                # Try to get metadata if available
+                try:
+                    metadata_result = collection.get(
+                        ids=[result['id']],
+                        include=['metadatas']
+                    )
+                    if metadata_result['metadatas']:
+                        metadata = metadata_result['metadatas'][0]
+                        filename = metadata.get('filename', 'Unknown Document')
+                        section_info = f"{metadata.get('section_number', 'Unknown')} - {metadata.get('section_title', 'Unknown')}"
+                        source_info = f"{filename}: {section_info}"
+                        sources.append(source_info)
+                    else:
+                        sources.append(f"Document chunk: {result['id']}")
+                except:
+                    sources.append(f"Document chunk: {result['id']}")
+            
+        except ImportError:
+            # Fallback to original search if hybrid_search module not available
+            print("Warning: Hybrid search not available, using original search")
+            results = collection.query(
+                query_texts=[message],
+                n_results=5,
+                include=['documents', 'metadatas', 'distances']
+            )
+            
+            if not results['documents'] or not results['documents'][0]:
+                return jsonify({
+                    'response': 'No relevant information found in the documents.',
+                    'sources': []
+                })
+            
+            context_chunks = results['documents'][0]
+            context = '\n\n'.join(context_chunks)
+            
+            # Prepare sources
+            sources = []
+            for metadata in results['metadatas'][0]:
+                filename = metadata.get('filename', 'Unknown Document')
+                section_info = f"{metadata.get('section_number', 'Unknown')} - {metadata.get('section_title', 'Unknown')}"
+                source_info = f"{filename}: {section_info}"
+                sources.append(source_info)
+        except Exception as e:
+            print(f"Error in hybrid search: {e}")
+            # Fallback to original search
+            results = collection.query(
+                query_texts=[message],
+                n_results=5,
+                include=['documents', 'metadatas', 'distances']
+            )
+            
+            if not results['documents'] or not results['documents'][0]:
+                return jsonify({
+                    'response': 'No relevant information found in the documents.',
+                    'sources': []
+                })
+            
+            context_chunks = results['documents'][0]
+            context = '\n\n'.join(context_chunks)
+            
+            # Prepare sources
+            sources = []
+            for metadata in results['metadatas'][0]:
+                filename = metadata.get('filename', 'Unknown Document')
+                section_info = f"{metadata.get('section_number', 'Unknown')} - {metadata.get('section_title', 'Unknown')}"
+                source_info = f"{filename}: {section_info}"
+                sources.append(source_info)
         
         # Generate response based on specified model
         if model == 'Claude Sonnet 4' and claude_client:
@@ -1093,14 +1371,6 @@ Let me help you understand this: [/INST]"""
         # Clean the response
         cleaned_answer = clean_markdown(answer)
         
-        # Prepare sources
-        sources = []
-        for metadata in results['metadatas'][0]:
-            filename = metadata.get('filename', 'Unknown Document')
-            section_info = f"{metadata.get('section_number', 'Unknown')} - {metadata.get('section_title', 'Unknown')}"
-            source_info = f"{filename}: {section_info}"
-            sources.append(source_info)
-        
         return jsonify({
             'response': cleaned_answer,
             'sources': sources
@@ -1216,8 +1486,8 @@ def switch_model():
 def api_documents():
     """Get list of ingested documents"""
     try:
-        # Get all documents from ChromaDB
-        results = collection.get()
+        # Get all documents from ChromaDB (use a large limit to get all documents)
+        results = collection.get(limit=10000)
         
         # Group by document using document_id from metadata
         documents = {}
@@ -1226,17 +1496,32 @@ def api_documents():
             document_id = metadata.get('document_id', '')
             filename = metadata.get('filename', '')
             
-            if not document_id and not filename:
+            if not document_id:
                 # Fallback: try to extract from chunk_id (for backward compatibility)
                 chunk_id = results['ids'][i]
                 if '_chunk_' in chunk_id:
                     # New format: document_id_chunk_number
                     document_id = chunk_id.split('_chunk_')[0]
-                    filename = document_id.split('_')[0] if '_' in document_id else document_id
                 else:
-                    # Old format: try to extract filename
-                    filename = chunk_id.split('_')[0] if '_' in chunk_id else 'Unknown'
-                    document_id = filename
+                    # Old format: try to extract filename from chunk_id
+                    # Handle various chunk_id formats
+                    if '_' in chunk_id:
+                        # Format like: filename_hash_chunk_number
+                        parts = chunk_id.split('_')
+                        if len(parts) >= 3:
+                            # Extract filename from first part
+                            document_id = parts[0]
+                        else:
+                            document_id = chunk_id
+                    else:
+                        document_id = chunk_id
+            
+            if not filename:
+                # Extract filename from document_id if available
+                if document_id and '_' in document_id:
+                    filename = document_id.split('_')[0]
+                else:
+                    filename = document_id if document_id else 'Unknown'
             
             # Use document_id as the key for grouping
             if document_id not in documents:
@@ -1244,7 +1529,7 @@ def api_documents():
                     'document_id': document_id,
                     'filename': filename,
                     'total_chunks': 0,
-                    'file_type': '.pdf',
+                    'file_type': metadata.get('file_type', '.pdf'),
                     'upload_timestamp': metadata.get('upload_timestamp', ''),
                     'extraction_method': metadata.get('extraction_method', 'unknown')
                 }
@@ -1315,12 +1600,57 @@ def api_document_search(filename):
         if not query:
             return jsonify({'error': 'No query provided'}), 400
         
-        # Search in ChromaDB
-        results = collection.query(
-            query_texts=[query],
-            n_results=n_results,
-            include=['documents', 'metadatas', 'distances']
-        )
+        # Search in ChromaDB using hybrid search
+        try:
+            from hybrid_search import HybridSearch
+            
+            # Initialize hybrid search
+            hybrid_search = HybridSearch(
+                chroma_path='./chroma_db',
+                collection_name='documents'
+            )
+            
+            # Use hybrid search with fallback
+            hybrid_results = hybrid_search.search_with_fallback(query, n_results)
+            
+            # Convert to expected format
+            results = {
+                'ids': [[result['id'] for result in hybrid_results]],
+                'documents': [[result['text'] for result in hybrid_results]],
+                'metadatas': [[]],
+                'distances': [[result['distance'] for result in hybrid_results]]
+            }
+            
+            # Get metadata for each result
+            for result in hybrid_results:
+                try:
+                    metadata_result = collection.get(
+                        ids=[result['id']],
+                        include=['metadatas']
+                    )
+                    if metadata_result['metadatas']:
+                        results['metadatas'][0].append(metadata_result['metadatas'][0])
+                    else:
+                        results['metadatas'][0].append({})
+                except:
+                    results['metadatas'][0].append({})
+            
+        except ImportError:
+            # Fallback to original search if hybrid_search module not available
+            print("Warning: Hybrid search not available, using original search")
+            results = collection.query(
+                query_texts=[query],
+                n_results=n_results,
+                include=['documents', 'metadatas', 'distances']
+            )
+        except Exception as e:
+            print(f"Error in hybrid search: {e}")
+            # Fallback to original search
+            results = collection.query(
+                query_texts=[query],
+                n_results=n_results,
+                include=['documents', 'metadatas', 'distances']
+            )
         
         # Filter results for the specific document
         filtered_results = []
@@ -1818,10 +2148,11 @@ def api_get_extraction_config():
                 'gpt4_chunking': True  # Enable GPT-4 chunking
             },
             'chunking': {
-                'method': 'auto',  # auto, gpt4, traditional
+                'method': 'improved',  # auto, improved, gpt4, traditional
                 'document_type': 'auto',  # auto, legal, technical, general
                 'preserve_structure': True,
-                'prefer_private_gpt4': True  # Prefer Private GPT-4 for chunking
+                'prefer_private_gpt4': True,  # Prefer Private GPT-4 for chunking
+                'use_improved_chunking': True  # Use the improved chunking strategy by default
             }
         }
         
