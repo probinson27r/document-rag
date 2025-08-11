@@ -6,6 +6,7 @@ flask-session
 langchain
 ollama
 openai
+pandas
 pdfplumber
 protobuf==4.24.4
 PyMuPDF
