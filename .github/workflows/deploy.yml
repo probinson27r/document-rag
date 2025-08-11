@@ -234,9 +234,11 @@ jobs:
           
           echo "🔄 Updating application..."
           
-          # Backup persistent data before deployment
+          # Smart application update preserving persistent data and virtual environment
           if [ -d "/opt/legal-rag-app" ]; then
-            echo "💾 Backing up persistent data and virtual environment..."
+            echo "🔄 Updating application while preserving persistent data..."
+            
+            # Backup only critical persistent data (not venv - it's managed in-place)
             sudo mkdir -p /tmp/backup
             if [ -d "/opt/legal-rag-app/chroma_db" ]; then
               sudo cp -r /opt/legal-rag-app/chroma_db /tmp/backup/ || true
@@ -247,18 +249,35 @@ jobs:
             if [ -d "/opt/legal-rag-app/flask_session" ]; then
               sudo cp -r /opt/legal-rag-app/flask_session /tmp/backup/ || true
             fi
-            # Backup virtual environment for reuse
+            
+            # Preserve virtual environment by moving it temporarily
             if [ -d "/opt/legal-rag-app/venv" ]; then
-              echo "📦 Backing up virtual environment..."
-              sudo cp -r /opt/legal-rag-app/venv /tmp/backup/ || true
+              echo "📦 Preserving virtual environment..."
+              sudo mv /opt/legal-rag-app/venv /tmp/preserved_venv || true
             fi
+            
+            # Remove application files but preserve structure
+            sudo find /opt/legal-rag-app -type f -name "*.py" -delete || true
+            sudo find /opt/legal-rag-app -type f -name "*.txt" -delete || true
+            sudo find /opt/legal-rag-app -type f -name "*.md" -delete || true
+            sudo find /opt/legal-rag-app -type f -name "*.sh" -delete || true
+            sudo find /opt/legal-rag-app -type f -name "*.service" -delete || true
+            sudo rm -rf /opt/legal-rag-app/templates /opt/legal-rag-app/static || true
+            
+            # Copy new application files
+            sudo cp -r deployment/* /opt/legal-rag-app/ || true
+            
+            # Restore preserved virtual environment
+            if [ -d "/tmp/preserved_venv" ]; then
+              echo "📦 Restoring preserved virtual environment..."
+              sudo mv /tmp/preserved_venv /opt/legal-rag-app/venv || true
+            fi
+          else
+            echo "🆕 Fresh installation..."
+            sudo mv deployment /opt/legal-rag-app
           fi
           
-          # Remove old application directory
-          sudo rm -rf /opt/legal-rag-app
-          
-          # Move new application
-          sudo mv deployment /opt/legal-rag-app
+          # Ensure proper ownership
           sudo chown -R ubuntu:ubuntu /opt/legal-rag-app
           
           # Restore persistent data
@@ -275,11 +294,6 @@ jobs:
             if [ -d "/tmp/backup/flask_session" ]; then
               sudo rm -rf /opt/legal-rag-app/flask_session
               sudo mv /tmp/backup/flask_session /opt/legal-rag-app/
-            fi
-            # Restore virtual environment for smart reuse
-            if [ -d "/tmp/backup/venv" ]; then
-              echo "📦 Restoring virtual environment..."
-              sudo mv /tmp/backup/venv /opt/legal-rag-app/
             fi
             # Clean up backup
             sudo rm -rf /tmp/backup
