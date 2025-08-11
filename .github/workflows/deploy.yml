@@ -84,23 +84,21 @@ jobs:
         
         # Create systemd service file
         echo "⚙️ Setting up systemd service..."
-        cat > /tmp/legal-rag.service << 'SERVICEEOF'
-[Unit]
-Description=Legal Document RAG System
-After=network.target
-
-[Service]
-Type=simple
-User=ubuntu
-WorkingDirectory=/opt/legal-rag-app
-Environment=PATH=/opt/legal-rag-app/venv/bin
-ExecStart=/opt/legal-rag-app/venv/bin/python app.py --host 0.0.0.0 --port 5001
-Restart=always
-RestartSec=3
-
-[Install]
-WantedBy=multi-user.target
-SERVICEEOF
+        echo "[Unit]" > /tmp/legal-rag.service
+        echo "Description=Legal Document RAG System" >> /tmp/legal-rag.service
+        echo "After=network.target" >> /tmp/legal-rag.service
+        echo "" >> /tmp/legal-rag.service
+        echo "[Service]" >> /tmp/legal-rag.service
+        echo "Type=simple" >> /tmp/legal-rag.service
+        echo "User=ubuntu" >> /tmp/legal-rag.service
+        echo "WorkingDirectory=/opt/legal-rag-app" >> /tmp/legal-rag.service
+        echo "Environment=PATH=/opt/legal-rag-app/venv/bin" >> /tmp/legal-rag.service
+        echo "ExecStart=/opt/legal-rag-app/venv/bin/python app.py --host 0.0.0.0 --port 5001" >> /tmp/legal-rag.service
+        echo "Restart=always" >> /tmp/legal-rag.service
+        echo "RestartSec=3" >> /tmp/legal-rag.service
+        echo "" >> /tmp/legal-rag.service
+        echo "[Install]" >> /tmp/legal-rag.service
+        echo "WantedBy=multi-user.target" >> /tmp/legal-rag.service
         
         # Install the service file
         sudo mv /tmp/legal-rag.service /etc/systemd/system/legal-rag.service
@@ -128,7 +126,7 @@ SERVICEEOF
         fi
         
         echo "✅ Deployment completed!"
-DEPLOYEOF
+        DEPLOYEOF
         
         chmod +x deployment/deploy.sh
         
@@ -194,7 +192,7 @@ DEPLOYEOF
           ./deploy.sh
           
           echo "✅ Deployment completed successfully!"
-SSHEOF
+        SSHEOF
         
         # Clean up
         rm -f ssh_key
@@ -236,6 +234,6 @@ SSHEOF
             sudo journalctl -u legal-rag --no-pager -n 20
             exit 1
           fi
-HEALTHEOF
+        HEALTHEOF
         
         rm -f ssh_key
