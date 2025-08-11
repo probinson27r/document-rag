@@ -42,13 +42,25 @@ class LangExtractChunker:
                  min_chunk_size: int = 200,
                  preserve_lists: bool = True,
                  preserve_sections: bool = True,
-                 use_langextract_api: bool = True):
+                 use_langextract_api: bool = True,
+                 enable_roman_numerals: bool = True,
+                 enable_bullet_points: bool = True,
+                 enable_indented_lists: bool = True,
+                 enable_legal_patterns: bool = True,
+                 enable_multi_level: bool = True,
+                 custom_list_patterns: List[str] = None):
         
         self.max_chunk_size = max_chunk_size
         self.min_chunk_size = min_chunk_size
         self.preserve_lists = preserve_lists
         self.preserve_sections = preserve_sections
         self.use_langextract_api = use_langextract_api
+        self.enable_roman_numerals = enable_roman_numerals
+        self.enable_bullet_points = enable_bullet_points
+        self.enable_indented_lists = enable_indented_lists
+        self.enable_legal_patterns = enable_legal_patterns
+        self.enable_multi_level = enable_multi_level
+        self.custom_list_patterns = custom_list_patterns or []
         
         # Initialize LangExtract if available
         self.langextract_available = False
@@ -71,20 +83,113 @@ class LangExtractChunker:
             r'^Clause\s+(\d+\.\d+)\s*[:.]?\s*(.+)$',   # Clause 3.2: Objectives
         ]
         
-        self.list_patterns = [
-            r'^(\d+)\.\s+(.+)$',          # 1. First objective
-            r'^\((\d+)\)\s+(.+)$',        # (1) First objective
-            r'^(\d+\))\s+(.+)$',          # 1) First objective
-            r'^([a-z])\.\s+(.+)$',        # a. Sub-objective
-            r'^\(([a-z])\)\s+(.+)$',      # (a) Sub-objective
-            r'^([A-Z])\.\s+(.+)$',        # A. Major objective
-            r'^\(([A-Z])\)\s+(.+)$',      # (A) Major objective
-        ]
+        # Build list patterns dynamically based on configuration
+        self.list_patterns = self._build_list_patterns()
         
         self.objectives_keywords = [
             'objectives', 'objective', 'goals', 'aims', 'purposes',
             'targets', 'outcomes', 'results', 'deliverables'
         ]
+    
+    def _build_list_patterns(self) -> List[str]:
+        """
+        Build list patterns dynamically based on configuration
+        
+        Returns:
+            List of regex patterns for list detection
+        """
+        patterns = []
+        
+        # Always include basic numbered and letter patterns
+        patterns.extend([
+            # Numbered lists
+            r'^(\d+)\.\s+(.+)$',          # 1. First objective
+            r'^\((\d+)\)\s+(.+)$',        # (1) First objective
+            r'^(\d+\))\s+(.+)$',          # 1) First objective
+            
+            # Letter lists
+            r'^([a-z])\.\s+(.+)$',        # a. Sub-objective
+            r'^\(([a-z])\)\s+(.+)$',      # (a) Sub-objective
+            r'^([a-z])\)\s+(.+)$',        # a) Sub-objective
+            r'^([A-Z])\.\s+(.+)$',        # A. Major objective
+            r'^\(([A-Z])\)\s+(.+)$',      # (A) Major objective
+            r'^([A-Z])\)\s+(.+)$',        # A) Major objective
+        ])
+        
+        # Add Roman numerals if enabled
+        if self.enable_roman_numerals:
+            patterns.extend([
+                r'^(i|ii|iii|iv|v|vi|vii|viii|ix|x)\.\s+(.+)$',  # i. First item
+                r'^\((i|ii|iii|iv|v|vi|vii|viii|ix|x)\)\s+(.+)$',  # (i) First item
+                r'^(I|II|III|IV|V|VI|VII|VIII|IX|X)\.\s+(.+)$',  # I. First item
+                r'^\((I|II|III|IV|V|VI|VII|VIII|IX|X)\)\s+(.+)$',  # (I) First item
+            ])
+        
+        # Add bullet points if enabled
+        if self.enable_bullet_points:
+            patterns.extend([
+                r'^[-*•]\s+(.+)$',        # - Bullet point
+                r'^[•]\s+(.+)$',          # • Bullet point
+                r'^[*]\s+(.+)$',          # * Bullet point
+            ])
+        
+        # Add indented lists if enabled
+        if self.enable_indented_lists:
+            patterns.extend([
+                r'^\s+(\d+)\.\s+(.+)$',   #   1. Indented item
+                r'^\s+([a-z])\.\s+(.+)$', #   a. Indented item
+                r'^\s+([A-Z])\.\s+(.+)$', #   A. Indented item
+                r'^\s+[-*•]\s+(.+)$',     #   - Indented bullet
+            ])
+        
+        # Add legal patterns if enabled
+        if self.enable_legal_patterns:
+            patterns.extend([
+                r'^(\d+\.\d+)\s+(.+)$',       # 1.1 Subsection
+                r'^(\d+\.\d+\.\d+)\s+(.+)$',  # 1.1.1 Sub-subsection
+                r'^\((\d+\.\d+)\)\s+(.+)$',   # (1.1) Subsection
+                r'^\((\d+\.\d+\.\d+)\)\s+(.+)$', # (1.1.1) Sub-subsection
+                
+                # Contract-specific patterns
+                r'^Clause\s+(\d+\.\d+)\s*[:.]?\s*(.+)$',  # Clause 1.1: Description
+                r'^Section\s+(\d+\.\d+)\s*[:.]?\s*(.+)$', # Section 1.1: Description
+                r'^Article\s+(\d+\.\d+)\s*[:.]?\s*(.+)$', # Article 1.1: Description
+            ])
+        
+        # Add multi-level patterns if enabled
+        if self.enable_multi_level:
+            patterns.extend([
+                r'^(\d+)\)\s+([a-z])\.\s+(.+)$',  # 1) a. Sub-item
+                r'^(\d+)\)\s+(\d+)\.\s+(.+)$',    # 1) 1. Sub-item
+            ])
+        
+        # Add custom patterns
+        patterns.extend(self.custom_list_patterns)
+        
+        return patterns
+    
+    def get_configuration_info(self) -> Dict[str, Any]:
+        """
+        Get information about the current configuration
+        
+        Returns:
+            Dictionary with configuration details
+        """
+        return {
+            'max_chunk_size': self.max_chunk_size,
+            'min_chunk_size': self.min_chunk_size,
+            'preserve_lists': self.preserve_lists,
+            'preserve_sections': self.preserve_sections,
+            'use_langextract_api': self.use_langextract_api,
+            'enable_roman_numerals': self.enable_roman_numerals,
+            'enable_bullet_points': self.enable_bullet_points,
+            'enable_indented_lists': self.enable_indented_lists,
+            'enable_legal_patterns': self.enable_legal_patterns,
+            'enable_multi_level': self.enable_multi_level,
+            'custom_list_patterns': self.custom_list_patterns,
+            'total_list_patterns': len(self.list_patterns),
+            'list_patterns': self.list_patterns
+        }
     
     def chunk_document(self, text: str) -> List[LangExtractChunk]:
         """
@@ -384,7 +489,7 @@ Extract all sections, lists, and key information while preserving the document's
     
     def _extract_list_items(self, content: str) -> List[Dict[str, Any]]:
         """
-        Extract list items from content
+        Extract list items from content with enhanced pattern matching
         
         Args:
             content: Content to extract list items from
@@ -396,6 +501,7 @@ Extract all sections, lists, and key information while preserving the document's
         lines = content.split('\n')
         
         for i, line in enumerate(lines):
+            original_line = line
             line = line.strip()
             if not line:
                 continue
@@ -404,15 +510,36 @@ Extract all sections, lists, and key information while preserving the document's
             for pattern in self.list_patterns:
                 match = re.match(pattern, line)
                 if match:
-                    number, text = match.groups()
-                    items.append({
-                        'number': number,
-                        'text': text.strip(),
-                        'line_number': i,
-                        'pattern': pattern,
-                        'hierarchy_level': self._get_hierarchy_level(number)
-                    })
+                    groups = match.groups()
+                    
+                    # Handle different pattern types
+                    if len(groups) == 2:
+                        number, text = groups
+                    elif len(groups) == 3:
+                        # Multi-level patterns like "1) a. text"
+                        number = f"{groups[0]}) {groups[1]}."
+                        text = groups[2]
+                    else:
+                        # For bullet points, the first group might be the bullet character
+                        number = groups[0] if groups[0] in ['-', '*', '•'] else groups[0]
+                        text = groups[1] if len(groups) > 1 else line[len(number):].strip()
+                    
+                    # Clean up the text
+                    text = text.strip()
+                    if text:
+                        items.append({
+                            'number': number,
+                            'text': text,
+                            'line_number': i,
+                            'pattern': pattern,
+                            'hierarchy_level': self._get_hierarchy_level(number),
+                            'original_line': original_line,
+                            'indentation': len(original_line) - len(original_line.lstrip())
+                        })
                     break
+        
+        # Sort items by line number and indentation
+        items.sort(key=lambda x: (x['line_number'], x['indentation']))
         
         return items
     
@@ -426,14 +553,39 @@ Extract all sections, lists, and key information while preserving the document's
         Returns:
             Hierarchy level (1 = top level, 2 = sub-level, etc.)
         """
+        # Handle multi-level patterns like "1) a."
+        if ')' in number and '.' in number:
+            return 2
+        
+        # Handle Roman numerals
+        roman_lower = ['i', 'ii', 'iii', 'iv', 'v', 'vi', 'vii', 'viii', 'ix', 'x']
+        roman_upper = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X']
+        
+        if number.lower() in roman_lower:
+            return 2
+        elif number in roman_upper:
+            return 2
+        
+        # Handle bullet points
+        if number in ['-', '*', '•']:
+            return 1
+        
+        # Handle numbered patterns
         if number.isdigit():
             return 1
-        elif number.isupper():
+        
+        # Handle letter patterns
+        if number.isupper():
             return 2
         elif number.islower():
             return 3
-        else:
-            return 1
+        
+        # Handle decimal patterns like "1.1", "1.1.1"
+        if '.' in number and number.replace('.', '').isdigit():
+            return len(number.split('.'))
+        
+        # Default to level 1
+        return 1
     
     def _chunk_large_section(self, section: Dict[str, Any], section_index: int) -> List[LangExtractChunk]:
         """
