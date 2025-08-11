@@ -49,6 +49,24 @@ class HybridSearch:
         query_lower = query.lower()
         return any(keyword in query_lower for keyword in list_keywords)
     
+    def is_objectives_query(self, query: str) -> bool:
+        """
+        Detect if the query is specifically asking about objectives
+        
+        Args:
+            query: Search query
+            
+        Returns:
+            True if query is about objectives
+        """
+        objectives_keywords = [
+            'objectives', 'objective', 'contract objectives', 'agreement objectives',
+            'section objectives', 'clause objectives'
+        ]
+        
+        query_lower = query.lower()
+        return any(keyword in query_lower for keyword in objectives_keywords)
+    
     def extract_section_numbers(self, query: str) -> List[str]:
         """
         Extract section numbers from query (e.g., "11.4", "Section 3.2")
@@ -136,6 +154,46 @@ class HybridSearch:
                         break
         
         return section_results
+    
+    def find_objectives_content(self, all_documents: List[str]) -> List[Dict]:
+        """
+        Find content specifically related to objectives
+        
+        Args:
+            all_documents: List of all document texts
+            
+        Returns:
+            List of objectives-related content
+        """
+        objectives_results = []
+        
+        for i, doc_text in enumerate(all_documents):
+            doc_lower = doc_text.lower()
+            
+            # Look for objectives-related patterns
+            objectives_patterns = [
+                r'\bobjectives?\b',
+                r'section\s+\d+\.\d+.*objectives?',
+                r'clause\s+\d+\.\d+.*objectives?',
+                r'\d+\.\d+.*objectives?'
+            ]
+            
+            for pattern in objectives_patterns:
+                if re.search(pattern, doc_lower, re.IGNORECASE):
+                    # Find numbered patterns in this document
+                    numbered_items = self.find_numbered_patterns(doc_text)
+                    
+                    objectives_results.append({
+                        'id': f'objectives_{i}',
+                        'text': doc_text,
+                        'numbered_items': numbered_items,
+                        'search_type': 'objectives_content',
+                        'distance': 0.0,  # High relevance
+                        'rank': len(objectives_results) + 1
+                    })
+                    break
+        
+        return objectives_results
     
     def expand_list_query(self, query: str, section_numbers: List[str]) -> List[str]:
         """
@@ -391,6 +449,9 @@ class HybridSearch:
         # Check if this is a list query
         is_list = self.is_list_query(query)
         
+        # Check if this is an objectives query
+        is_objectives = self.is_objectives_query(query)
+        
         if is_list and section_numbers:
             self.logger.info(f"List query detected for sections: {section_numbers}")
             
@@ -403,6 +464,49 @@ class HybridSearch:
             # Fallback to hybrid search with list bias
             self.logger.info("No list results, trying hybrid search with list bias")
             return self.hybrid_search(query, n_results, semantic_weight=0.3, exact_weight=0.7)
+        
+        elif is_objectives and not section_numbers:
+            self.logger.info("Objectives query detected without section numbers")
+            
+            # Try to find objectives content specifically
+            try:
+                all_results = self.collection.get()
+                objectives_results = self.find_objectives_content(all_results['documents'])
+                
+                if objectives_results:
+                    self.logger.info(f"Found {len(objectives_results)} objectives-specific results")
+                    return objectives_results[:n_results]
+                
+                # Fallback to semantic search with objectives focus
+                self.logger.info("No objectives-specific results, trying semantic search with objectives focus")
+                objectives_queries = [
+                    "objectives of the agreement",
+                    "section 3.2 objectives",
+                    "contract objectives",
+                    "agreement objectives",
+                    "objectives list"
+                ]
+                
+                all_results = []
+                for obj_query in objectives_queries:
+                    results = self.semantic_search(obj_query, n_results=5, distance_threshold=0.9)
+                    all_results.extend(results)
+                
+                # Remove duplicates and sort
+                seen_ids = set()
+                unique_results = []
+                for result in all_results:
+                    if result['id'] not in seen_ids:
+                        seen_ids.add(result['id'])
+                        unique_results.append(result)
+                
+                unique_results.sort(key=lambda x: x['distance'])
+                return unique_results[:n_results]
+                
+            except Exception as e:
+                self.logger.error(f"Objectives search failed: {e}")
+                # Fallback to regular semantic search
+                return self.semantic_search(query, n_results, distance_threshold=0.8)
         
         elif section_numbers:
             self.logger.info(f"Found section numbers: {section_numbers}")
@@ -466,7 +570,10 @@ if __name__ == "__main__":
         "Statement of Work",
         "List the objectives in section 3.2",
         "Show all objectives in section 3.2",
-        "Enumerate every objective in section 3.2"
+        "Enumerate every objective in section 3.2",
+        "List the contract objectives",
+        "What are the objectives",
+        "Contract objectives"
     ]
     
     print("Testing Enhanced Hybrid Search:")
@@ -475,9 +582,11 @@ if __name__ == "__main__":
     for query in test_queries:
         print(f"\nQuery: '{query}'")
         is_list = hybrid_search.is_list_query(query)
+        is_objectives = hybrid_search.is_objectives_query(query)
         section_numbers = hybrid_search.extract_section_numbers(query)
         
         print(f"  List query: {is_list}")
+        print(f"  Objectives query: {is_objectives}")
         print(f"  Section numbers: {section_numbers}")
         
         results = hybrid_search.search_with_fallback(query, n_results=3)
