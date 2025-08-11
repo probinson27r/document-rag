@@ -217,7 +217,7 @@ class SemanticChunker:
             chunks.append(chunk)
         else:
             # Split large section into smaller chunks
-            sub_chunks = self._split_large_section(section)
+            sub_chunks = self._chunk_large_section(section)
             chunks.extend(sub_chunks)
         
         return chunks
@@ -255,16 +255,8 @@ class SemanticChunker:
     
     def _chunk_objectives_section(self, section: Section) -> List[Chunk]:
         """
-        Special chunking for objectives sections to preserve complete lists
-        
-        Args:
-            section: Objectives section to chunk
-            
-        Returns:
-            List of chunks preserving complete objectives
+        Special handling for objectives sections to preserve complete numbered lists
         """
-        chunks = []
-        
         # Extract all list items from the section
         list_items = self._extract_list_items(section.content)
         
@@ -284,57 +276,112 @@ class SemanticChunker:
                 )
                 return [chunk]
             else:
-                # Split large section into smaller chunks
-                return self._split_large_section(section)
+                # Use regular chunking for large sections without lists
+                return self._chunk_large_section(section)
         
-        logger.info(f"Found {len(list_items)} list items in objectives section")
+        # For objectives sections with lists, ensure the entire list is preserved
+        # Check if the content fits in a single chunk
+        full_content = f"## {section.number} {section.title}\n\n{section.content}"
         
-        # Group list items by their hierarchy level
-        grouped_items = self._group_list_items_by_hierarchy(list_items)
+        if len(full_content) <= self.max_chunk_size:
+            # Keep entire objectives section in one chunk
+            chunk = Chunk(
+                content=full_content,
+                chunk_id=f"section_{section.number}_complete",
+                section_number=section.number,
+                section_title=section.title,
+                chunk_type="complete_objectives_section",
+                semantic_theme="objectives",
+                list_items=list_items,
+                start_position=0,
+                end_position=len(section.content)
+            )
+            return [chunk]
+        else:
+            # If the objectives section is too large, try to split intelligently
+            # Look for natural break points that don't break the numbered list
+            return self._chunk_large_objectives_section(section, list_items)
+    
+    def _chunk_large_objectives_section(self, section: Section, list_items: List[str]) -> List[Chunk]:
+        """
+        Handle large objectives sections by finding natural break points
+        that don't break numbered lists
+        """
+        chunks = []
+        lines = section.content.split('\n')
+        current_chunk_lines = []
+        current_chunk_size = 0
         
-        # Create chunks that preserve complete groups
-        current_chunk_content = f"## {section.number} {section.title}\n\n"
-        current_items = []
+        # Add section header
+        header = f"## {section.number} {section.title}\n\n"
+        current_chunk_lines.append(header)
+        current_chunk_size += len(header)
         
-        for group in grouped_items:
-            group_content = self._format_list_group(group)
+        in_numbered_list = False
+        list_start_line = -1
+        
+        for i, line in enumerate(lines):
+            line_size = len(line) + 1  # +1 for newline
             
-            # Check if adding this group would exceed chunk size
-            if len(current_chunk_content) + len(group_content) > self.max_chunk_size and current_items:
-                # Create chunk with current items
+            # Check if this line starts a numbered list
+            if self._is_numbered_list_start(line):
+                if not in_numbered_list:
+                    in_numbered_list = True
+                    list_start_line = i
+                # Continue with current chunk to keep list together
+            
+            # Check if this line ends a numbered list
+            elif in_numbered_list and not self._is_numbered_list_continuation(line):
+                in_numbered_list = False
+                # Add the complete list to current chunk
+                for j in range(list_start_line, i + 1):
+                    current_chunk_lines.append(lines[j])
+                    current_chunk_size += len(lines[j]) + 1
+                list_start_line = -1
+            
+            # If we're in a numbered list, keep adding to current chunk
+            elif in_numbered_list:
+                current_chunk_lines.append(line)
+                current_chunk_size += line_size
+                continue
+            
+            # Regular line processing
+            if current_chunk_size + line_size > self.max_chunk_size and current_chunk_lines:
+                # Create chunk and start new one
+                chunk_content = '\n'.join(current_chunk_lines)
                 chunk = Chunk(
-                    content=current_chunk_content.strip(),
-                    chunk_id=f"objectives_{section.number}_{len(chunks)}",
+                    content=chunk_content,
+                    chunk_id=f"section_{section.number}_part_{len(chunks)}",
                     section_number=section.number,
                     section_title=section.title,
-                    chunk_type="objectives_list",
+                    chunk_type="objectives_section_part",
                     semantic_theme="objectives",
-                    list_items=current_items,
+                    list_items=self._extract_list_items(chunk_content),
                     start_position=0,
-                    end_position=len(current_chunk_content)
+                    end_position=len(chunk_content)
                 )
                 chunks.append(chunk)
                 
                 # Start new chunk
-                current_chunk_content = f"## {section.number} {section.title} (continued)\n\n"
-                current_items = []
+                current_chunk_lines = [header]
+                current_chunk_size = len(header)
             
-            # Add group to current chunk
-            current_chunk_content += group_content + "\n\n"
-            current_items.extend(group)
+            current_chunk_lines.append(line)
+            current_chunk_size += line_size
         
-        # Add final chunk if there's content
-        if current_items:
+        # Add final chunk
+        if current_chunk_lines:
+            chunk_content = '\n'.join(current_chunk_lines)
             chunk = Chunk(
-                content=current_chunk_content.strip(),
-                chunk_id=f"objectives_{section.number}_{len(chunks)}",
+                content=chunk_content,
+                chunk_id=f"section_{section.number}_part_{len(chunks)}",
                 section_number=section.number,
                 section_title=section.title,
-                chunk_type="objectives_list",
+                chunk_type="objectives_section_part",
                 semantic_theme="objectives",
-                list_items=current_items,
+                list_items=self._extract_list_items(chunk_content),
                 start_position=0,
-                end_position=len(current_chunk_content)
+                end_position=len(chunk_content)
             )
             chunks.append(chunk)
         
@@ -476,7 +523,7 @@ class SemanticChunker:
         else:
             return "general"
     
-    def _split_large_section(self, section: Section) -> List[Chunk]:
+    def _chunk_large_section(self, section: Section) -> List[Chunk]:
         """
         Split a large section into smaller chunks
         
@@ -570,6 +617,46 @@ class SemanticChunker:
             chunks.append(chunk)
         
         return chunks
+
+    def _is_numbered_list_start(self, line: str) -> bool:
+        """
+        Check if a line starts a numbered list
+        """
+        line = line.strip()
+        # Match patterns like "i.", "ii.", "iii.", "1.", "2.", "3.", etc.
+        patterns = [
+            r'^[ivx]+\.',  # Roman numerals
+            r'^[0-9]+\.',  # Arabic numerals
+            r'^\([ivx]+\)',  # Roman numerals in parentheses
+            r'^\([0-9]+\)',  # Arabic numerals in parentheses
+            r'^[a-z]\)',    # Lowercase letters
+            r'^[A-Z]\)',    # Uppercase letters
+        ]
+        
+        for pattern in patterns:
+            if re.match(pattern, line):
+                return True
+        return False
+    
+    def _is_numbered_list_continuation(self, line: str) -> bool:
+        """
+        Check if a line continues a numbered list (indented content)
+        """
+        line = line.strip()
+        # Empty lines don't break lists
+        if not line:
+            return True
+        
+        # If it starts with a number/letter pattern, it's a new list item
+        if self._is_numbered_list_start(line):
+            return True
+        
+        # If it's indented or starts with common list continuation patterns
+        if line.startswith(' ') or line.startswith('\t'):
+            return True
+        
+        # If it's a continuation line (doesn't start with a new list item)
+        return not self._is_numbered_list_start(line)
 
 # Example usage and testing
 if __name__ == "__main__":
