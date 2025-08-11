@@ -581,7 +581,7 @@ Extract all sections, lists, and key information while preserving the document's
     
     def _build_nested_structure(self, raw_items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
-        Build nested list structure based on indentation levels
+        Build nested list structure based on indentation levels and semantic relationships
         
         Args:
             raw_items: List of raw list items with indentation info
@@ -595,37 +595,141 @@ Extract all sections, lists, and key information while preserving the document's
         # Sort by line number to maintain document order
         raw_items.sort(key=lambda x: x['line_number'])
         
-        # Build hierarchy based on indentation
+        # Build hierarchy based on indentation and semantic relationships
         root_items = []
         item_stack = []  # Stack to track current hierarchy
         
-        for item in raw_items:
+        for i, item in enumerate(raw_items):
             current_level = item['indentation']
             
-            # Find the appropriate parent based on indentation
-            while item_stack and item_stack[-1]['indentation'] >= current_level:
-                item_stack.pop()
-            
-            # Set parent and add to hierarchy
-            if item_stack:
-                parent = item_stack[-1]
-                item['parent_id'] = f"{parent['line_number']}_{parent['indentation']}"
-                parent['children'].append(item)
+            # Check for semantic nesting (lettered items under numbered items)
+            if (i > 0 and current_level == 0 and 
+                self._should_nest_semantically(item, raw_items[i-1])):
+                # This item should be nested under the previous item
+                previous_item = raw_items[i-1]
+                
+                # Find the appropriate parent for semantic nesting
+                parent_item = self._find_semantic_parent(item, raw_items, i, item_stack)
+                
+                if parent_item:
+                    # Add as child of the semantic parent
+                    item['parent_id'] = f"{parent_item['line_number']}_{parent_item['indentation']}"
+                    parent_item['children'].append(item)
+                    item['hierarchy_level'] = parent_item['hierarchy_level'] + 1
+                    item['nesting_depth'] = parent_item['nesting_depth'] + 1
+                    item['is_nested'] = True
+                    parent_item['has_children'] = True
+                else:
+                    # Fallback: add as root item
+                    item['parent_id'] = None
+                    root_items.append(item)
+                    item['hierarchy_level'] = 1
+                    item['nesting_depth'] = 0
+                    item['is_nested'] = False
             else:
-                item['parent_id'] = None
-                root_items.append(item)
-            
-            item_stack.append(item)
-            
-            # Add hierarchy level based on nesting depth
-            item['hierarchy_level'] = len(item_stack)
+                # Standard indentation-based nesting
+                # Find the appropriate parent based on indentation
+                while item_stack and item_stack[-1]['indentation'] >= current_level:
+                    item_stack.pop()
+                
+                # Set parent and add to hierarchy
+                if item_stack:
+                    parent = item_stack[-1]
+                    item['parent_id'] = f"{parent['line_number']}_{parent['indentation']}"
+                    parent['children'].append(item)
+                    item['hierarchy_level'] = parent['hierarchy_level'] + 1
+                    item['nesting_depth'] = parent['nesting_depth'] + 1
+                    item['is_nested'] = True
+                    parent['has_children'] = True
+                else:
+                    item['parent_id'] = None
+                    root_items.append(item)
+                    item['hierarchy_level'] = 1
+                    item['nesting_depth'] = 0
+                    item['is_nested'] = False
+                
+                item_stack.append(item)
             
             # Add nested structure info
-            item['has_children'] = len(item['children']) > 0
-            item['is_nested'] = item['parent_id'] is not None
-            item['nesting_depth'] = len(item_stack) - 1
+            item['has_children'] = len(item.get('children', [])) > 0
         
         return root_items
+    
+    def _should_nest_semantically(self, current_item: Dict[str, Any], previous_item: Dict[str, Any]) -> bool:
+        """
+        Determine if current item should be nested under previous item based on semantic rules
+        
+        Args:
+            current_item: Current item to check
+            previous_item: Previous item to check against
+            
+        Returns:
+            True if current item should be nested under previous item
+        """
+        current_number = current_item['number']
+        previous_number = previous_item['number']
+        
+        # Rule 1: Lettered items (a, b, c) should be nested under numbered items
+        if (current_number.isalpha() and current_number.islower() and 
+            previous_number.isdigit()):
+            return True
+        
+        # Rule 2: Consecutive lettered items (a, b, c) should be nested under the same numbered parent
+        if (current_number.isalpha() and current_number.islower() and 
+            previous_number.isalpha() and previous_number.islower()):
+            return True
+        
+        # Rule 3: Roman numerals (i, ii, iii) should be nested under previous items
+        roman_lower = ['i', 'ii', 'iii', 'iv', 'v', 'vi', 'vii', 'viii', 'ix', 'x']
+        if current_number.lower() in roman_lower:
+            return True
+        
+        # Rule 4: Bullet points should be nested under previous items if they follow immediately
+        if current_number in ['-', '*', '•']:
+            return True
+        
+        return False
+    
+    def _find_semantic_parent(self, item: Dict[str, Any], raw_items: List[Dict[str, Any]], 
+                             current_index: int, item_stack: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        """
+        Find the appropriate semantic parent for an item
+        
+        Args:
+            item: Current item to find parent for
+            raw_items: All raw items
+            current_index: Current item index
+            item_stack: Current item stack
+            
+        Returns:
+            Parent item or None
+        """
+        current_number = item['number']
+        
+        # For lettered items, find the most recent numbered item
+        if current_number.isalpha() and current_number.islower():
+            # Look backwards through raw_items to find the most recent numbered item
+            for j in range(current_index - 1, -1, -1):
+                previous_item = raw_items[j]
+                if previous_item['number'].isdigit():
+                    # Find this numbered item in the stack
+                    for stack_item in reversed(item_stack):
+                        if (stack_item['line_number'] == previous_item['line_number'] and 
+                            stack_item['indentation'] == previous_item['indentation']):
+                            return stack_item
+                    break
+        
+        # For other semantic nesting, use the previous item
+        if current_index > 0:
+            previous_item = raw_items[current_index - 1]
+            for stack_item in reversed(item_stack):
+                if (stack_item['line_number'] == previous_item['line_number'] and 
+                    stack_item['indentation'] == previous_item['indentation']):
+                    return stack_item
+        
+        return None
+    
+    
     
     def _flatten_nested_items(self, items: List[Dict[str, Any]], level: int = 0) -> List[Dict[str, Any]]:
         """
