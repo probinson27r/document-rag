@@ -184,11 +184,59 @@ jobs:
           tar -xzf deployment.tar.gz
           
           echo "🔄 Updating application..."
+          
+          # Backup persistent data before deployment
+          if [ -d "/opt/legal-rag-app" ]; then
+            echo "💾 Backing up persistent data..."
+            sudo mkdir -p /tmp/backup
+            if [ -d "/opt/legal-rag-app/chroma_db" ]; then
+              sudo cp -r /opt/legal-rag-app/chroma_db /tmp/backup/ || true
+            fi
+            if [ -d "/opt/legal-rag-app/uploads" ]; then
+              sudo cp -r /opt/legal-rag-app/uploads /tmp/backup/ || true
+            fi
+            if [ -d "/opt/legal-rag-app/flask_session" ]; then
+              sudo cp -r /opt/legal-rag-app/flask_session /tmp/backup/ || true
+            fi
+          fi
+          
+          # Remove old application directory
           sudo rm -rf /opt/legal-rag-app
+          
+          # Move new application
           sudo mv deployment /opt/legal-rag-app
           sudo chown -R ubuntu:ubuntu /opt/legal-rag-app
           
+          # Restore persistent data
+          if [ -d "/tmp/backup" ]; then
+            echo "🔄 Restoring persistent data..."
+            if [ -d "/tmp/backup/chroma_db" ]; then
+              sudo rm -rf /opt/legal-rag-app/chroma_db
+              sudo mv /tmp/backup/chroma_db /opt/legal-rag-app/
+            fi
+            if [ -d "/tmp/backup/uploads" ]; then
+              sudo rm -rf /opt/legal-rag-app/uploads
+              sudo mv /tmp/backup/uploads /opt/legal-rag-app/
+            fi
+            if [ -d "/tmp/backup/flask_session" ]; then
+              sudo rm -rf /opt/legal-rag-app/flask_session
+              sudo mv /tmp/backup/flask_session /opt/legal-rag-app/
+            fi
+            # Clean up backup
+            sudo rm -rf /tmp/backup
+            echo "✅ Persistent data restored"
+          fi
+          
+          # Ensure proper ownership after restore
+          sudo chown -R ubuntu:ubuntu /opt/legal-rag-app
+          
           cd /opt/legal-rag-app
+          
+          # Verify persistent data directories exist
+          echo "🔍 Verifying persistent data directories..."
+          ls -la chroma_db/ 2>/dev/null && echo "✅ ChromaDB directory exists" || echo "⚠️  ChromaDB directory is empty (first deployment)"
+          ls -la uploads/ 2>/dev/null && echo "✅ Uploads directory exists" || echo "ℹ️  Uploads directory is empty"
+          
           ./deploy.sh
           
           echo "✅ Deployment completed successfully!"
