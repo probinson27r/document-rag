@@ -111,8 +111,8 @@ jobs:
         echo "🚀 Starting legal-rag service..."
         sudo systemctl start legal-rag
         
-        # Wait for startup
-        sleep 5
+        # Wait for startup (dependencies installation can take time)
+        sleep 15
         
         # Check service status
         if sudo systemctl is-active legal-rag >/dev/null; then
@@ -250,38 +250,76 @@ jobs:
         set -e
         # ssh_key prepared earlier; USER_HOST exported
         
-        # Wait for application to start
-        sleep 30
+        # Wait for application to fully start (increased delay)
+        echo "⏳ Waiting 60 seconds for application to fully initialize..."
+        sleep 60
         
-        # Check service and health endpoint
+        # Robust health check with retries
         ssh -i ssh_key -o StrictHostKeyChecking=no -o ConnectTimeout=30 "$USER_HOST" << 'HEALTHEOF'
-          echo "🔍 Checking service status..."
-          if sudo systemctl is-active legal-rag >/dev/null; then
-            echo "✅ legal-rag service is active"
+          echo "🔍 Starting health check process..."
+          
+          # Function to check service with retries
+          check_service_health() {
+            local max_attempts=6
+            local attempt=1
             
-            echo "🔌 Checking port binding..."
-            if sudo netstat -tlnp | grep :5001 >/dev/null; then
+            while [ $attempt -le $max_attempts ]; do
+              echo "🔄 Health check attempt $attempt/$max_attempts..."
+              
+              # Check if service is active
+              if ! sudo systemctl is-active legal-rag >/dev/null; then
+                echo "❌ Service is not active on attempt $attempt"
+                if [ $attempt -eq $max_attempts ]; then
+                  echo "💥 Service failed to start after $max_attempts attempts"
+                  sudo systemctl status legal-rag --no-pager -l
+                  sudo journalctl -u legal-rag --no-pager -n 30
+                  return 1
+                fi
+                sleep 10
+                attempt=$((attempt + 1))
+                continue
+              fi
+              
+              echo "✅ Service is active"
+              
+              # Check if port is listening
+              if ! sudo netstat -tlnp | grep :5001 >/dev/null; then
+                echo "⚠️  Port 5001 not yet listening on attempt $attempt"
+                if [ $attempt -eq $max_attempts ]; then
+                  echo "💥 Port 5001 never started listening"
+                  sudo systemctl status legal-rag --no-pager -l
+                  return 1
+                fi
+                sleep 10
+                attempt=$((attempt + 1))
+                continue
+              fi
+              
               echo "✅ Port 5001 is listening"
               
-              echo "🏥 Testing health endpoint..."
+              # Test health endpoint
               if curl -f http://localhost:5001/health >/dev/null 2>&1; then
-                echo "✅ Health check passed"
+                echo "✅ Health check passed on attempt $attempt!"
                 echo "🌐 ALB should be able to reach the application"
+                return 0
               else
-                echo "❌ Health endpoint failed"
-                exit 1
+                echo "⚠️  Health endpoint not responding on attempt $attempt"
+                if [ $attempt -eq $max_attempts ]; then
+                  echo "💥 Health endpoint failed after $max_attempts attempts"
+                  # Show more debug info
+                  echo "🔍 Debug info:"
+                  curl -v http://localhost:5001/health || true
+                  sudo journalctl -u legal-rag --no-pager -n 20
+                  return 1
+                fi
+                sleep 10
+                attempt=$((attempt + 1))
               fi
-            else
-              echo "❌ Port 5001 is not listening"
-              sudo systemctl status legal-rag --no-pager -l
-              exit 1
-            fi
-          else
-            echo "❌ legal-rag service is not active"
-            sudo systemctl status legal-rag --no-pager -l
-            sudo journalctl -u legal-rag --no-pager -n 20
-            exit 1
-          fi
+            done
+          }
+          
+          # Run the health check
+          check_service_health
         HEALTHEOF
         
         rm -f ssh_key
