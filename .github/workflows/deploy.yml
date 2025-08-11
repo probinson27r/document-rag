@@ -218,7 +218,9 @@ jobs:
     - name: Deploy to EC2
       run: |
         set -e
-        # ssh_key prepared in previous step; USER_HOST exported
+        # Recreate SSH key for this step (USER_HOST available from environment)
+        echo "${{ secrets.SSH_PRIVATE_KEY }}" | sed 's/\\n/\n/g' > ssh_key
+        chmod 600 ssh_key
         
         # Copy deployment package
         scp -i ssh_key -o StrictHostKeyChecking=no -o ConnectTimeout=30 deployment.tar.gz "$USER_HOST":/home/ubuntu/
@@ -299,13 +301,16 @@ jobs:
           echo "✅ Deployment completed successfully!"
         SSHEOF
         
-        # Clean up
-        rm -f ssh_key
+        # Note: SSH key will be recreated in health check step
     
     - name: Health check
       run: |
         set -e
-        # ssh_key prepared earlier; USER_HOST exported
+        # Recreate SSH key for this step (USER_HOST available from environment)
+        echo "${{ secrets.SSH_PRIVATE_KEY }}" | sed 's/\\n/\n/g' > ssh_key
+        chmod 600 ssh_key
+        
+        echo "🔍 Health checking $USER_HOST..."
         
         # Wait for application to start (optimized timing with smart venv management)
         echo "⏳ Waiting 45 seconds for application to initialize..."
