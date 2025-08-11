@@ -59,20 +59,67 @@ jobs:
         echo "🛑 Stopping legal-rag service..."
         sudo systemctl stop legal-rag 2>/dev/null || true
         
-        # Create/update virtual environment
-        echo "🔧 Setting up virtual environment..."
-        if [ -d "venv" ]; then
-            rm -rf venv
+        # Smart virtual environment management
+        echo "🔧 Managing virtual environment..."
+        
+        # Check if we need to rebuild venv (compare requirements.txt hash)
+        REQUIREMENTS_HASH=$(sha256sum requirements.txt | cut -d' ' -f1)
+        VENV_HASH_FILE="venv/.requirements_hash"
+        REBUILD_VENV=false
+        
+        if [ ! -d "venv" ]; then
+            echo "📝 No existing virtual environment found - creating new one"
+            REBUILD_VENV=true
+        elif [ ! -f "$VENV_HASH_FILE" ]; then
+            echo "📝 No requirements hash found - rebuilding venv"
+            REBUILD_VENV=true
+        else
+            STORED_HASH=$(cat "$VENV_HASH_FILE" 2>/dev/null || echo "")
+            if [ "$REQUIREMENTS_HASH" != "$STORED_HASH" ]; then
+                echo "📝 Requirements.txt changed - rebuilding venv"
+                echo "   Old hash: $STORED_HASH"
+                echo "   New hash: $REQUIREMENTS_HASH"
+                REBUILD_VENV=true
+            else
+                echo "✅ Requirements unchanged - reusing existing venv"
+                echo "   Hash: $REQUIREMENTS_HASH"
+            fi
         fi
-        python3 -m venv venv
-        source venv/bin/activate
         
-        # Upgrade pip
-        pip install --upgrade pip
-        
-        # Install dependencies with proper error handling
-        echo "📦 Installing dependencies..."
-        pip install --no-cache-dir -r requirements.txt
+        if [ "$REBUILD_VENV" = true ]; then
+            # Backup existing venv for rollback if needed
+            if [ -d "venv" ]; then
+                echo "💾 Backing up existing venv..."
+                sudo mv venv venv.backup.$(date +%s) || true
+            fi
+            
+            # Create fresh virtual environment
+            echo "🆕 Creating fresh virtual environment..."
+            python3 -m venv venv
+            source venv/bin/activate
+            
+            # Upgrade pip
+            pip install --upgrade pip
+            
+            # Install dependencies (with cache for faster installs)
+            echo "📦 Installing dependencies..."
+            pip install -r requirements.txt
+            
+            # Store requirements hash for future comparisons
+            echo "$REQUIREMENTS_HASH" > "$VENV_HASH_FILE"
+            echo "✅ Virtual environment created and hash stored"
+            
+            # Clean up old backups (keep only last 2)
+            echo "🧹 Cleaning up old venv backups..."
+            ls -1t venv.backup.* 2>/dev/null | tail -n +3 | xargs rm -rf || true
+        else
+            # Activate existing venv
+            source venv/bin/activate
+            
+            # Quick pip upgrade check (much faster than full rebuild)
+            echo "⚡ Quick pip upgrade check..."
+            pip install --upgrade pip --quiet
+        fi
         
         # Verify critical dependencies
         echo "🔍 Verifying dependencies..."
@@ -187,7 +234,7 @@ jobs:
           
           # Backup persistent data before deployment
           if [ -d "/opt/legal-rag-app" ]; then
-            echo "💾 Backing up persistent data..."
+            echo "💾 Backing up persistent data and virtual environment..."
             sudo mkdir -p /tmp/backup
             if [ -d "/opt/legal-rag-app/chroma_db" ]; then
               sudo cp -r /opt/legal-rag-app/chroma_db /tmp/backup/ || true
@@ -197,6 +244,11 @@ jobs:
             fi
             if [ -d "/opt/legal-rag-app/flask_session" ]; then
               sudo cp -r /opt/legal-rag-app/flask_session /tmp/backup/ || true
+            fi
+            # Backup virtual environment for reuse
+            if [ -d "/opt/legal-rag-app/venv" ]; then
+              echo "📦 Backing up virtual environment..."
+              sudo cp -r /opt/legal-rag-app/venv /tmp/backup/ || true
             fi
           fi
           
@@ -221,6 +273,11 @@ jobs:
             if [ -d "/tmp/backup/flask_session" ]; then
               sudo rm -rf /opt/legal-rag-app/flask_session
               sudo mv /tmp/backup/flask_session /opt/legal-rag-app/
+            fi
+            # Restore virtual environment for smart reuse
+            if [ -d "/tmp/backup/venv" ]; then
+              echo "📦 Restoring virtual environment..."
+              sudo mv /tmp/backup/venv /opt/legal-rag-app/
             fi
             # Clean up backup
             sudo rm -rf /tmp/backup
@@ -250,9 +307,9 @@ jobs:
         set -e
         # ssh_key prepared earlier; USER_HOST exported
         
-        # Wait for application to fully start (increased delay)
-        echo "⏳ Waiting 60 seconds for application to fully initialize..."
-        sleep 60
+        # Wait for application to start (optimized timing with smart venv management)
+        echo "⏳ Waiting 45 seconds for application to initialize..."
+        sleep 45
         
         # Robust health check with retries
         ssh -i ssh_key -o StrictHostKeyChecking=no -o ConnectTimeout=30 "$USER_HOST" << 'HEALTHEOF'
