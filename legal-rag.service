@@ -1,0 +1,15 @@
+[Unit]
+Description=Legal Document RAG System
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/opt/legal-rag-app
+Environment=PATH=/opt/legal-rag-app/venv/bin
+ExecStart=/opt/legal-rag-app/venv/bin/python app.py --host 0.0.0.0 --port 5001
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
