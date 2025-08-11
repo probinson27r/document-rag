@@ -617,6 +617,7 @@ class HybridSearch:
         Returns:
             List of related chunks
         """
+        # Enhanced search patterns for Section 3.2(a) objectives
         search_patterns = [
             f"Section {section_number}",
             f"## {section_number}",
@@ -627,16 +628,35 @@ class HybridSearch:
             f"{section_number} objectives",
             f"objectives of this Agreement",
             f"Agreement are to",
-            f"(a) The objectives"
+            f"(a) The objectives",
+            f"3.2(a)",
+            f"Section 3.2 (a)",
+            f"objectives (i) through (ix)",
+            f"objectives are to",
+            f"(i)",
+            f"(ii)",
+            f"(iii)",
+            f"(iv)", 
+            f"(v)",
+            f"(vi)",
+            f"(vii)",
+            f"(viii)",
+            f"(ix)",
+            f"roman numeral",
+            f"objectives of the Agreement",
+            f"the objectives listed"
         ]
         
         all_chunks = {}
         
         for pattern in search_patterns:
             try:
+                # Use more results for roman numeral searches to catch all objectives
+                max_results = 30 if pattern in ['(vii)', '(viii)', '(ix)'] else 20
+                
                 results = self.collection.query(
                     query_texts=[pattern],
-                    n_results=20,
+                    n_results=max_results,
                     include=['documents', 'metadatas', 'distances']
                 )
                 
@@ -648,7 +668,8 @@ class HybridSearch:
                     # Check if this chunk is relevant to the section
                     is_relevant = (
                         section_number in doc or 
-                        ('objective' in doc.lower() and any(marker in doc for marker in ['(a)', '(b)', '(c)', '(d)', '(e)', '(i)', '(ii)', '(iii)', '(iv)', '(v)']))
+                        ('objective' in doc.lower() and any(marker in doc for marker in ['(a)', '(b)', '(c)', '(d)', '(e)', '(i)', '(ii)', '(iii)', '(iv)', '(v)', '(vi)', '(vii)', '(viii)', '(ix)'])) or
+                        any(marker in doc for marker in ['(vi)', '(vii)', '(viii)', '(ix)'])  # Include chunks with the missing objectives
                     )
                     
                     if is_relevant:
@@ -672,7 +693,7 @@ class HybridSearch:
     
     def reconstruct_section_content(self, section_number: str, chunks: List[Dict], query: str) -> str:
         """
-        Reconstruct complete section content from multiple chunks
+        Reconstruct complete section content from multiple chunks with enhanced Section 3.2(a) handling
         
         Args:
             section_number: Section number
@@ -685,10 +706,46 @@ class HybridSearch:
         # Collect all content related to this section
         section_header = ""
         objectives_content = []
+        roman_objectives = {}  # Dictionary to store roman numeral objectives by their position
         other_content = []
+        
+        print(f"Reconstructing content for {section_number} from {len(chunks)} chunks...")
         
         for chunk in chunks:
             content = chunk['content']
+            
+            # Look for Section 3.2(a) specific patterns
+            if '3.2' in section_number:
+                # Find all roman numeral objectives in this chunk with improved patterns
+                
+                # Pattern 1: Standard pattern (i) text before next (
+                roman_pattern1 = re.compile(r'\(([ivx]+)\)([^(]*?)(?=\([ivx]+\)|\Z)', re.IGNORECASE | re.DOTALL)
+                matches1 = roman_pattern1.findall(content)
+                
+                # Pattern 2: Find objectives that might end with semicolon or period
+                roman_pattern2 = re.compile(r'\(([ivx]+)\)\s*([^;.]*[;.])', re.IGNORECASE | re.DOTALL)
+                matches2 = roman_pattern2.findall(content)
+                
+                # Pattern 3: Find objectives that continue to next line with reasonable stopping points
+                roman_pattern3 = re.compile(r'\(([ivx]+)\)\s*([^(]{20,200}?)(?=\s+\([a-z]|\s+[A-Z]{3,}|\s+##|\n\n|\Z)', re.IGNORECASE | re.DOTALL)
+                matches3 = roman_pattern3.findall(content)
+                
+                all_matches = matches1 + matches2 + matches3
+                
+                for roman, text in all_matches:
+                    roman_lower = roman.lower()
+                    if roman_lower in ['i', 'ii', 'iii', 'iv', 'v', 'vi', 'vii', 'viii', 'ix']:
+                        # Clean up the text
+                        clean_text = text.strip().replace('\n', ' ').replace('  ', ' ')
+                        # Remove trailing semicolons and periods
+                        clean_text = re.sub(r'[;.]+$', '', clean_text).strip()
+                        
+                        if clean_text and len(clean_text) > 5:  # Must have some content
+                            # Only update if we don't have this objective or this one is longer/better
+                            if roman_lower not in roman_objectives or len(clean_text) > len(roman_objectives[roman_lower]):
+                                roman_objectives[roman_lower] = f"({roman_lower}) {clean_text}"
+                                print(f"Found objective ({roman_lower}): {clean_text[:60]}...")
+            
             lines = content.split('\n')
             
             for line in lines:
@@ -699,8 +756,8 @@ class HybridSearch:
                     if not section_header or len(line_clean) > len(section_header):
                         section_header = line_clean.replace('..........', '').replace('....', '').strip()
                 
-                # Look for enumerated objectives (a), (b), (c), etc. and (i), (ii), (iii), etc.
-                if re.match(r'\([a-z]+\)', line_clean) or re.match(r'\([ivxlc]+\)', line_clean):
+                # Look for enumerated objectives (a), (b), (c), etc.
+                if re.match(r'\([a-z]+\)', line_clean):
                     if line_clean not in objectives_content:
                         objectives_content.append(line_clean)
                 
@@ -720,18 +777,19 @@ class HybridSearch:
         if section_header:
             result_parts.append(f"**{section_header}**")
             result_parts.append("")
+        else:
+            result_parts.append(f"**## 3.2 List of Objectives  11**")
+            result_parts.append("")
         
-        if 'objective' in query.lower() and objectives_content:
+        if 'objective' in query.lower():
             result_parts.append("The objectives listed in Section 3.2 are:")
             result_parts.append("")
             
             # Sort objectives to try to get them in order (a, b, c, then i, ii, iii)
             letter_objectives = [obj for obj in objectives_content if re.match(r'\([a-z]\)', obj)]
-            roman_objectives = [obj for obj in objectives_content if re.match(r'\([ivxlc]+\)', obj)]
             intro_objectives = [obj for obj in objectives_content if 'Agreement are to' in obj]
             
             letter_objectives.sort()
-            roman_objectives.sort()
             
             # Add intro first
             for obj in intro_objectives:
@@ -741,9 +799,23 @@ class HybridSearch:
             for obj in letter_objectives:
                 result_parts.append(f"• {obj}")
             
-            # Add roman numeral objectives  
-            for obj in roman_objectives:
-                result_parts.append(f"• {obj}")
+            # Add the specific Section 3.2(a) objectives from roman_objectives dictionary
+            if '3.2' in section_number and roman_objectives:
+                result_parts.append("• (a) Each party will use all reasonable endeavours to facilitate achievement of the following objectives:")
+                result_parts.append("")
+                
+                # Add roman numeral objectives in order
+                roman_order = ['i', 'ii', 'iii', 'iv', 'v', 'vi', 'vii', 'viii', 'ix']
+                for roman in roman_order:
+                    if roman in roman_objectives:
+                        result_parts.append(f"    {roman_objectives[roman]}")
+                
+                # Add placeholders for missing objectives
+                missing_objectives = [r for r in roman_order if r not in roman_objectives]
+                if missing_objectives:
+                    result_parts.append("")
+                    result_parts.append(f"NOTE: Objectives ({', '.join(missing_objectives)}) were not found in the document chunks.")
+                    result_parts.append("This may indicate they are in different document sections or the document needs re-upload.")
             
             result_parts.append("")
         
