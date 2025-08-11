@@ -53,10 +53,11 @@ import traceback
 class DocumentProcessor:
     """Handles document ingestion and text extraction"""
     
-    def __init__(self, use_gpt4_enhancement: bool = True, use_gpt4_chunking: bool = True):
+    def __init__(self, use_gpt4_enhancement: bool = True, use_gpt4_chunking: bool = True, enable_ocr: bool = False):
         self.supported_formats = ['.pdf', '.docx', '.txt', '.csv', '.json']
         self.use_gpt4_enhancement = use_gpt4_enhancement and GPT4_EXTRACTION_AVAILABLE
         self.use_gpt4_chunking = use_gpt4_chunking and GPT4_CHUNKING_AVAILABLE
+        self.enable_ocr = enable_ocr
         
         # Initialize GPT-4 extractor if available
         self.gpt4_extractor = None
@@ -118,54 +119,62 @@ class DocumentProcessor:
         return '\n'.join(new_lines)
 
     def extract_text_from_pdf(self, file_path: str) -> str:
-        """Extract text from a PDF by running OCR first, then marker-pdf, then unstructured.io (skipping ToC), then pdfplumber, then PyPDF2. Preserves structure and annotates headings."""
+        """Extract text from a PDF. OCR is optional and disabled by default for faster processing."""
         import sys, traceback, re, os
         print(f"[DEBUG] extract_text_from_pdf called with: {file_path}")
+        print(f"[DEBUG] OCR enabled: {self.enable_ocr}")
         sys.stdout.flush()
         text = ""
         ocr_temp_pdf = None
-        # Step 1: OCR (Tesseract via pdf2image)
-        try:
-            from pdf2image import convert_from_path
-            import pytesseract
-            from fpdf import FPDF
-            import requests
-            FONT_PATH = "DejaVuSans.ttf"
-            # Download DejaVuSans.ttf if not present
-            if not os.path.exists(FONT_PATH):
-                print("[fpdf2] Downloading DejaVuSans.ttf font...")
-                url = "https://github.com/dejavu-fonts/dejavu-fonts/raw/master/ttf/DejaVuSans.ttf"
-                r = requests.get(url)
-                with open(FONT_PATH, "wb") as f:
-                    f.write(r.content)
-                print("[fpdf2] Font downloaded.")
-            from fpdf import FPDF
-            class UnicodePDF(FPDF):
-                def __init__(self):
-                    super().__init__()
-                    self.add_font("DejaVu", "", FONT_PATH, uni=True)
-                    self.set_font("DejaVu", size=12)
-            print("[OCR] Converting PDF pages to images...")
-            images = convert_from_path(file_path)
-            print(f"[OCR] {len(images)} pages converted. Running OCR...")
-            ocr_texts = [pytesseract.image_to_string(img) for img in images]
-            print("[OCR] OCR extraction complete. Rebuilding PDF from OCR text with Unicode support...")
-            ocr_temp_pdf = file_path + ".ocr.pdf"
-            pdf = UnicodePDF()
-            pdf.set_auto_page_break(auto=True, margin=15)
-            for page_text in ocr_texts:
-                pdf.add_page()
-                for line in page_text.splitlines():
-                    pdf.cell(0, 10, txt=line, ln=1)
-            pdf.output(ocr_temp_pdf)
-            print(f"[OCR] OCR-based PDF created: {ocr_temp_pdf}")
-            sys.stdout.flush()
-        except Exception as e:
-            print(f"[OCR] Extraction failed: {e}")
-            traceback.print_exc()
-            sys.stdout.flush()
-            ocr_temp_pdf = None
-        # Step 2: marker-pdf on OCR-based PDF
+        
+        # Step 1: OCR (Tesseract via pdf2image) - OPTIONAL
+        if self.enable_ocr:
+            print("[OCR] OCR is enabled - processing with image conversion...")
+            try:
+                from pdf2image import convert_from_path
+                import pytesseract
+                from fpdf import FPDF
+                import requests
+                FONT_PATH = "DejaVuSans.ttf"
+                # Download DejaVuSans.ttf if not present
+                if not os.path.exists(FONT_PATH):
+                    print("[fpdf2] Downloading DejaVuSans.ttf font...")
+                    url = "https://github.com/dejavu-fonts/dejavu-fonts/raw/master/ttf/DejaVuSans.ttf"
+                    r = requests.get(url)
+                    with open(FONT_PATH, "wb") as f:
+                        f.write(r.content)
+                    print("[fpdf2] Font downloaded.")
+                from fpdf import FPDF
+                class UnicodePDF(FPDF):
+                    def __init__(self):
+                        super().__init__()
+                        self.add_font("DejaVu", "", FONT_PATH, uni=True)
+                        self.set_font("DejaVu", size=12)
+                print("[OCR] Converting PDF pages to images...")
+                images = convert_from_path(file_path)
+                print(f"[OCR] {len(images)} pages converted. Running OCR...")
+                ocr_texts = [pytesseract.image_to_string(img) for img in images]
+                print("[OCR] OCR extraction complete. Rebuilding PDF from OCR text with Unicode support...")
+                ocr_temp_pdf = file_path + ".ocr.pdf"
+                pdf = UnicodePDF()
+                pdf.set_auto_page_break(auto=True, margin=15)
+                for page_text in ocr_texts:
+                    pdf.add_page()
+                    for line in page_text.splitlines():
+                        pdf.cell(0, 10, txt=line, ln=1)
+                pdf.output(ocr_temp_pdf)
+                print(f"[OCR] OCR-based PDF created: {ocr_temp_pdf}")
+                sys.stdout.flush()
+            except Exception as e:
+                print(f"[OCR] Extraction failed: {e}")
+                traceback.print_exc()
+                sys.stdout.flush()
+                ocr_temp_pdf = None
+        else:
+            print("[OCR] OCR is disabled - using direct text extraction for faster processing...")
+            # Skip OCR and go directly to fast text extraction
+            
+        # Step 2: marker-pdf on OCR-based PDF (only when OCR is enabled)
         if ocr_temp_pdf and os.path.exists(ocr_temp_pdf):
             try:
                 from marker.pdf import parse_pdf
@@ -233,8 +242,8 @@ class DocumentProcessor:
                 print(f"[unstructured] Extraction failed: {e}")
                 traceback.print_exc()
                 sys.stdout.flush()
-        # Step 4: pdfplumber with layout/heading
-        if not text.strip():
+        # Step 4: pdfplumber with layout/heading (prioritized when OCR is disabled)
+        if not text.strip() or not self.enable_ocr:
             try:
                 import pdfplumber
                 lines = []
@@ -594,15 +603,17 @@ class DocumentRAG:
                  chunk_size: int = 512,  # 512 characters per chunk
                  chunk_overlap: int = 128,  # 128 character overlap
                  chroma_db_path: str = "./chroma_db",
-                 chunking_method: str = "semantic"):
+                 chunking_method: str = "semantic",
+                 enable_ocr: bool = False):
         
         self.model_name = model_name
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
         self.chunking_method = chunking_method
+        self.enable_ocr = enable_ocr
         
         # Initialize components
-        self.document_processor = DocumentProcessor()
+        self.document_processor = DocumentProcessor(enable_ocr=enable_ocr)
         self.ollama_client = OllamaClient()
         # Use SentenceTransformer for embeddings
         from sentence_transformers import SentenceTransformer

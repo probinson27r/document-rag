@@ -19,3 +19,11 @@ boto3
 PyJWT
 cryptography
 numpy<2.0.0
+unstructured
+pdf2image
+pytesseract
+fpdf
+pi_heif
+unstructured_inference
+PyMuPDF
+sentence-transformers

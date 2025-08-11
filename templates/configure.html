@@ -186,6 +186,19 @@
             </select>
         </div>
         
+        <div class="model-section" id="ocrConfigSection">
+            <label class="model-label">OCR (Optical Character Recognition)</label>
+            <div style="display: flex; align-items: center; margin-bottom: 8px;">
+                <input type="checkbox" id="enableOcr" style="margin-right: 8px;">
+                <label for="enableOcr" style="font-size: 13px; color: #374151;">Enable OCR for scanned documents</label>
+            </div>
+            <div style="font-size: 11px; color: #6b7280; margin-top: 4px;">
+                <strong>Disabled by default for faster processing.</strong><br>
+                Enable only for scanned documents or PDFs with poor text extraction.<br>
+                OCR converts PDF pages to images for text extraction (slower but more accurate for scanned content).
+            </div>
+        </div>
+        
         <div class="model-section" id="extractionStatusSection">
             <label class="model-label">Extraction System Status</label>
             <div id="extractionStatus" style="background: #f9fafb; border-radius: 6px; padding: 12px; font-size: 12px;">
@@ -302,6 +315,9 @@
             document.getElementById('enableContractAnalysis').checked = data.features?.contract_analysis !== false;
             document.getElementById('enableDocumentSummary').checked = data.features?.document_summary === true;
             
+            // Set OCR configuration
+            document.getElementById('enableOcr').checked = data.ocr?.enabled === true;
+            
         } catch (error) {
             console.error('Failed to load extraction config:', error);
             showNotification('Failed to load extraction configuration', 'warning');
@@ -321,6 +337,9 @@
                     structured_data: document.getElementById('enableStructuredData').checked,
                     contract_analysis: document.getElementById('enableContractAnalysis').checked,
                     document_summary: document.getElementById('enableDocumentSummary').checked
+                },
+                ocr: {
+                    enabled: document.getElementById('enableOcr').checked
                 }
             };
 
@@ -701,6 +720,9 @@
     document.getElementById('enableStructuredData').addEventListener('change', saveExtractionConfig);
     document.getElementById('enableContractAnalysis').addEventListener('change', saveExtractionConfig);
     document.getElementById('enableDocumentSummary').addEventListener('change', saveExtractionConfig);
+    
+    // OCR configuration
+    document.getElementById('enableOcr').addEventListener('change', saveExtractionConfig);
     
     // Test extraction button
     document.getElementById('testExtractionBtn').addEventListener('click', async function() {

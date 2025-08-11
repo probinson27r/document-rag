@@ -533,17 +533,19 @@ def ingest_document_with_improved_chunking(file_path: str, processing_id: str = 
         # Use the DocumentRAG class with improved chunking
         from document_rag import DocumentRAG
         
-        # Get chunking method from configuration
+        # Get chunking method and OCR configuration
         try:
             extraction_config = session.get('extraction_config', {})
             chunking_method = extraction_config.get('chunking', {}).get('method', 'semantic')
+            enable_ocr = extraction_config.get('ocr', {}).get('enabled', False)
         except RuntimeError:
             # No request context, use default
             chunking_method = 'semantic'
+            enable_ocr = False
         
         # Initialize RAG system with error handling for ChromaDB conflicts
         try:
-            rag = DocumentRAG(chunking_method=chunking_method)
+            rag = DocumentRAG(chunking_method=chunking_method, enable_ocr=enable_ocr)
         except Exception as chroma_error:
             if "already exists" in str(chroma_error):
                 # If there's a ChromaDB instance conflict, try to use the existing one
@@ -551,7 +553,7 @@ def ingest_document_with_improved_chunking(file_path: str, processing_id: str = 
                 # Wait a moment and try again
                 import time
                 time.sleep(1)
-                rag = DocumentRAG(chunking_method=chunking_method)
+                rag = DocumentRAG(chunking_method=chunking_method, enable_ocr=enable_ocr)
             else:
                 raise chroma_error
         
@@ -829,15 +831,17 @@ def upload_file():
                     # Use general document processing for other file types
                     from document_rag import DocumentRAG
                     
-                    # Get chunking method from configuration
+                    # Get chunking method and OCR configuration
                     try:
                         extraction_config = session.get('extraction_config', {})
                         chunking_method = extraction_config.get('chunking', {}).get('method', 'semantic')
+                        enable_ocr = extraction_config.get('ocr', {}).get('enabled', False)
                     except RuntimeError:
                         # No request context, use default
                         chunking_method = 'semantic'
+                        enable_ocr = False
                     
-                    rag = DocumentRAG(chunking_method=chunking_method)
+                    rag = DocumentRAG(chunking_method=chunking_method, enable_ocr=enable_ocr)
                     result = rag.ingest_document(filepath)
                     
                     if "Successfully ingested" in result:
