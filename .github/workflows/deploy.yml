@@ -101,17 +101,51 @@ jobs:
         # Create tar.gz
         tar -czf deployment.tar.gz deployment/
     
+    - name: Validate SSH host and key
+      run: |
+        set -e
+        # Read and sanitize host from secret
+        HOST_RAW="${{ secrets.EC2_INSTANCE_IP }}"
+        HOST_TRIMMED=$(echo "$HOST_RAW" | tr -d ' \t\r\n')
+        if [ -z "$HOST_TRIMMED" ]; then
+          echo "::error::EC2_INSTANCE_IP GitHub secret is missing or empty"
+          exit 1
+        fi
+        # If user included username in the secret, respect it; otherwise default to ubuntu@
+        if echo "$HOST_TRIMMED" | grep -q "@"; then
+          USER_HOST="$HOST_TRIMMED"
+        else
+          USER_HOST="ubuntu@$HOST_TRIMMED"
+        fi
+        echo "Using SSH target: $USER_HOST"
+
+        # Prepare SSH key (handle both real newlines and escaped \n)
+        echo "${{ secrets.SSH_PRIVATE_KEY }}" | sed 's/\\n/\n/g' > ssh_key
+        chmod 600 ssh_key
+
+        # Basic DNS/port checks (non-fatal DNS info)
+        which dig >/dev/null 2>&1 && dig +short "${HOST_TRIMMED}" || true
+        which nslookup >/dev/null 2>&1 && nslookup "${HOST_TRIMMED}" || true
+
+        # Check SSH connectivity quickly
+        ssh -i ssh_key -o StrictHostKeyChecking=no -o ConnectTimeout=15 "$USER_HOST" "echo 'SSH connectivity OK'" || {
+          echo "::error::Unable to reach $USER_HOST via SSH. Check EC2 public IP/DNS, security groups (port 22), and that the key matches the instance."
+          exit 1
+        }
+
+        # Export for subsequent steps
+        echo "USER_HOST=$USER_HOST" >> $GITHUB_ENV
+
     - name: Deploy to EC2
       run: |
-        # Create SSH key file
-        echo "${{ secrets.SSH_PRIVATE_KEY }}" > ssh_key
-        chmod 600 ssh_key
+        set -e
+        # ssh_key prepared in previous step; USER_HOST exported
         
         # Copy deployment package
-        scp -i ssh_key -o StrictHostKeyChecking=no deployment.tar.gz ubuntu@${{ secrets.EC2_INSTANCE_IP }}:/home/ubuntu/
+        scp -i ssh_key -o StrictHostKeyChecking=no -o ConnectTimeout=30 deployment.tar.gz "$USER_HOST":/home/ubuntu/
         
         # Execute deployment
-        ssh -i ssh_key -o StrictHostKeyChecking=no ubuntu@${{ secrets.EC2_INSTANCE_IP }} << 'EOF'
+        ssh -i ssh_key -o StrictHostKeyChecking=no -o ConnectTimeout=30 "$USER_HOST" << 'EOF'
           set -e
           
           echo "📦 Extracting deployment package..."
@@ -133,14 +167,14 @@ jobs:
     
     - name: Health check
       run: |
-        echo "${{ secrets.SSH_PRIVATE_KEY }}" > ssh_key
-        chmod 600 ssh_key
+        set -e
+        # ssh_key prepared earlier; USER_HOST exported
         
         # Wait for application to start
         sleep 30
         
         # Check if application is running
-        ssh -i ssh_key -o StrictHostKeyChecking=no ubuntu@${{ secrets.EC2_INSTANCE_IP }} << 'EOF'
+        ssh -i ssh_key -o StrictHostKeyChecking=no -o ConnectTimeout=30 "$USER_HOST" << 'EOF'
           if pgrep -f "python.*app.py" > /dev/null; then
             echo "✅ Application is running"
             curl -f http://localhost:5001/health || echo "❌ Health check failed"
