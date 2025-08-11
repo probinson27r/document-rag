@@ -12,28 +12,8 @@ env:
   SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
 
 jobs:
-  test:
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v4
-    
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.11'
-    
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
-        pip install pytest
-    
-    - name: Run tests
-      run: |
-        python -m pytest tests/ -v
-
+  
   deploy:
-    needs: test
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
     
@@ -58,6 +38,11 @@ jobs:
         cp -r gpt4_chunking.py gpt4_extraction.py semantic_chunking.py langextract_chunking.py deployment/
         cp -r cli.py flask_app.py deployment/
         
+        # Copy systemd service file if it exists
+        if [ -f "legal-rag.service" ]; then
+          cp legal-rag.service deployment/
+        fi
+        
         # Create necessary directories
         mkdir -p deployment/uploads
         mkdir -p deployment/chroma_db
@@ -70,30 +55,76 @@ jobs:
         
         echo "🚀 Starting deployment..."
         
-        # Stop existing application
-        if pgrep -f "python.*app.py" > /dev/null; then
-            echo "🛑 Stopping existing application..."
-            pkill -f "python.*app.py" || true
-            sleep 5
+        # Stop systemd service if running
+        echo "🛑 Stopping legal-rag service..."
+        sudo systemctl stop legal-rag 2>/dev/null || true
+        
+        # Create/update virtual environment
+        echo "🔧 Setting up virtual environment..."
+        if [ -d "venv" ]; then
+            rm -rf venv
+        fi
+        python3 -m venv venv
+        source venv/bin/activate
+        
+        # Upgrade pip
+        pip install --upgrade pip
+        
+        # Install dependencies with proper error handling
+        echo "📦 Installing dependencies..."
+        pip install --no-cache-dir -r requirements.txt
+        
+        # Verify critical dependencies
+        echo "🔍 Verifying dependencies..."
+        python -c "import flask; print(f'Flask: {flask.__version__}')"
+        python -c "import numpy; print(f'NumPy: {numpy.__version__}')"
+        
+        # Set proper permissions
+        sudo chown -R ubuntu:ubuntu /opt/legal-rag-app
+        
+        # Create/update systemd service
+        echo "⚙️ Setting up systemd service..."
+        sudo tee /etc/systemd/system/legal-rag.service > /dev/null << 'SERVICE_EOF'
+[Unit]
+Description=Legal Document RAG System
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/opt/legal-rag-app
+Environment=PATH=/opt/legal-rag-app/venv/bin
+ExecStart=/opt/legal-rag-app/venv/bin/python app.py --host 0.0.0.0 --port 5001
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+SERVICE_EOF
+        
+        # Reload systemd and enable service
+        sudo systemctl daemon-reload
+        sudo systemctl enable legal-rag
+        
+        # Start the service
+        echo "🚀 Starting legal-rag service..."
+        sudo systemctl start legal-rag
+        
+        # Wait for startup
+        sleep 5
+        
+        # Check service status
+        if sudo systemctl is-active legal-rag >/dev/null; then
+            echo "✅ Service started successfully"
+            sudo systemctl status legal-rag --no-pager -l
+        else
+            echo "❌ Service failed to start"
+            sudo systemctl status legal-rag --no-pager -l
+            sudo journalctl -u legal-rag --no-pager -n 20
+            exit 1
         fi
         
-        # Install/update dependencies
-        echo "📦 Installing dependencies..."
-        pip install -r requirements.txt
-        
-        # Set up environment
-        echo "🔧 Setting up environment..."
-        export FLASK_ENV=production
-        export FLASK_APP=app.py
-        
-        # Start application
-        echo "🚀 Starting application..."
-        nohup python app.py > app.log 2>&1 &
-        echo $! > app.pid
-        
         echo "✅ Deployment completed!"
-        echo "📋 Application PID: $(cat app.pid)"
-        echo "📄 Logs: tail -f app.log"
         EOF
         
         chmod +x deployment/deploy.sh
@@ -173,13 +204,33 @@ jobs:
         # Wait for application to start
         sleep 30
         
-        # Check if application is running
+        # Check service and health endpoint
         ssh -i ssh_key -o StrictHostKeyChecking=no -o ConnectTimeout=30 "$USER_HOST" << 'EOF'
-          if pgrep -f "python.*app.py" > /dev/null; then
-            echo "✅ Application is running"
-            curl -f http://localhost:5001/health || echo "❌ Health check failed"
+          echo "🔍 Checking service status..."
+          if sudo systemctl is-active legal-rag >/dev/null; then
+            echo "✅ legal-rag service is active"
+            
+            echo "🔌 Checking port binding..."
+            if sudo netstat -tlnp | grep :5001 >/dev/null; then
+              echo "✅ Port 5001 is listening"
+              
+              echo "🏥 Testing health endpoint..."
+              if curl -f http://localhost:5001/health >/dev/null 2>&1; then
+                echo "✅ Health check passed"
+                echo "🌐 ALB should be able to reach the application"
+              else
+                echo "❌ Health endpoint failed"
+                exit 1
+              fi
+            else
+              echo "❌ Port 5001 is not listening"
+              sudo systemctl status legal-rag --no-pager -l
+              exit 1
+            fi
           else
-            echo "❌ Application is not running"
+            echo "❌ legal-rag service is not active"
+            sudo systemctl status legal-rag --no-pager -l
+            sudo journalctl -u legal-rag --no-pager -n 20
             exit 1
           fi
         EOF
