@@ -47,10 +47,11 @@ EXPOSE 5001
 ENV FLASK_APP=app.py
 ENV FLASK_ENV=production
 ENV PYTHONUNBUFFERED=1
+ENV DISABLE_AUTH=true
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:5001/api/status || exit 1
+# Health check - use /health endpoint which doesn't require authentication
+HEALTHCHECK --interval=30s --timeout=30s --start-period=60s --retries=5 \
+    CMD curl -f http://localhost:5001/health || exit 1
 
-# Run the application with Python 3
-CMD ["python3", "app.py"] 
+# Run the application with Python 3 and HTTPS enabled
+CMD ["python3", "app.py", "--https"] 
