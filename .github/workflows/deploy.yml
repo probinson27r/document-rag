@@ -140,6 +140,7 @@ jobs:
         echo "User=ubuntu" >> /tmp/legal-rag.service
         echo "WorkingDirectory=/opt/legal-rag-app" >> /tmp/legal-rag.service
         echo "Environment=PATH=/opt/legal-rag-app/venv/bin" >> /tmp/legal-rag.service
+        echo "EnvironmentFile=-/opt/legal-rag-app/.env" >> /tmp/legal-rag.service
         echo "ExecStart=/opt/legal-rag-app/venv/bin/python app.py --host 0.0.0.0 --port 5001" >> /tmp/legal-rag.service
         echo "Restart=always" >> /tmp/legal-rag.service
         echo "RestartSec=3" >> /tmp/legal-rag.service
@@ -304,6 +305,19 @@ jobs:
           sudo chown -R ubuntu:ubuntu /opt/legal-rag-app
           
           cd /opt/legal-rag-app
+          
+          # Set up environment variables for secrets access fallback
+          echo "🔧 Setting up environment variables..."
+          cat > .env << 'ENVEOF'
+# Environment variables for Legal Document RAG System
+# These serve as fallbacks if AWS Secrets Manager is not accessible
+FLASK_ENV=production
+# Note: Add your actual API keys here or use AWS Secrets Manager
+# PRIVATE_GPT4_API_KEY=your-private-gpt4-key
+# ANTHROPIC_API_KEY=your-anthropic-key  
+# OPENAI_API_KEY=your-openai-key
+# SECRET_KEY=your-flask-secret-key
+ENVEOF
           
           # Verify persistent data directories exist
           echo "🔍 Verifying persistent data directories..."
