@@ -129,8 +129,6 @@ class LangExtractChunker:
         if self.enable_bullet_points:
             patterns.extend([
                 r'^[-*•]\s+(.+)$',        # - Bullet point
-                r'^[•]\s+(.+)$',          # • Bullet point
-                r'^[*]\s+(.+)$',          # * Bullet point
             ])
         
         # Add indented lists if enabled
@@ -489,17 +487,19 @@ Extract all sections, lists, and key information while preserving the document's
     
     def _extract_list_items(self, content: str) -> List[Dict[str, Any]]:
         """
-        Extract list items from content with enhanced pattern matching
+        Extract list items from content with nested list support
         
         Args:
             content: Content to extract list items from
             
         Returns:
-            List of list items with metadata
+            List of list items with metadata including nested structure
         """
         items = []
         lines = content.split('\n')
         
+        # First pass: identify all list items with their indentation
+        raw_items = []
         for i, line in enumerate(lines):
             original_line = line
             line = line.strip()
@@ -524,24 +524,171 @@ Extract all sections, lists, and key information while preserving the document's
                         number = groups[0] if groups[0] in ['-', '*', '•'] else groups[0]
                         text = groups[1] if len(groups) > 1 else line[len(number):].strip()
                     
+                    # Special handling for bullet points - check if this is a bullet point pattern
+                    if pattern in [r'^[-*•]\s+(.+)$', r'^\s+[-*•]\s+(.+)$']:
+                        # For bullet point patterns, the first group is the text, not the bullet
+                        # We need to extract the bullet character from the original line
+                        bullet_char = line.strip()[0]  # Get the first character
+                        number = bullet_char
+                        text = groups[0]  # The text is in the first group
+                    
                     # Clean up the text
                     text = text.strip()
                     if text:
-                        items.append({
+                        indentation = len(original_line) - len(original_line.lstrip())
+                        raw_items.append({
                             'number': number,
                             'text': text,
                             'line_number': i,
                             'pattern': pattern,
-                            'hierarchy_level': self._get_hierarchy_level(number),
                             'original_line': original_line,
-                            'indentation': len(original_line) - len(original_line.lstrip())
+                            'indentation': indentation,
+                            'list_type': self._determine_list_type(number),
+                            'parent_id': None,
+                            'children': []
                         })
                     break
         
-        # Sort items by line number and indentation
-        items.sort(key=lambda x: (x['line_number'], x['indentation']))
+        # Second pass: build nested structure based on indentation
+        items = self._build_nested_structure(raw_items)
         
         return items
+    
+    def _determine_list_type(self, number: str) -> str:
+        """
+        Determine if a list item is ordered or unordered
+        
+        Args:
+            number: List item number/marker
+            
+        Returns:
+            'ordered' or 'unordered'
+        """
+        # Unordered list markers
+        if number in ['-', '*', '•']:
+            return 'unordered'
+        
+        # Ordered list markers
+        if (number.isdigit() or 
+            number.isalpha() or 
+            number in ['i', 'ii', 'iii', 'iv', 'v', 'vi', 'vii', 'viii', 'ix', 'x'] or
+            number in ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X'] or
+            '.' in number or
+            ')' in number):
+            return 'ordered'
+        
+        return 'ordered'  # Default to ordered
+    
+    def _build_nested_structure(self, raw_items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Build nested list structure based on indentation levels
+        
+        Args:
+            raw_items: List of raw list items with indentation info
+            
+        Returns:
+            List of items with nested structure
+        """
+        if not raw_items:
+            return []
+        
+        # Sort by line number to maintain document order
+        raw_items.sort(key=lambda x: x['line_number'])
+        
+        # Build hierarchy based on indentation
+        root_items = []
+        item_stack = []  # Stack to track current hierarchy
+        
+        for item in raw_items:
+            current_level = item['indentation']
+            
+            # Find the appropriate parent based on indentation
+            while item_stack and item_stack[-1]['indentation'] >= current_level:
+                item_stack.pop()
+            
+            # Set parent and add to hierarchy
+            if item_stack:
+                parent = item_stack[-1]
+                item['parent_id'] = f"{parent['line_number']}_{parent['indentation']}"
+                parent['children'].append(item)
+            else:
+                item['parent_id'] = None
+                root_items.append(item)
+            
+            item_stack.append(item)
+            
+            # Add hierarchy level based on nesting depth
+            item['hierarchy_level'] = len(item_stack)
+            
+            # Add nested structure info
+            item['has_children'] = len(item['children']) > 0
+            item['is_nested'] = item['parent_id'] is not None
+            item['nesting_depth'] = len(item_stack) - 1
+        
+        return root_items
+    
+    def _flatten_nested_items(self, items: List[Dict[str, Any]], level: int = 0) -> List[Dict[str, Any]]:
+        """
+        Flatten nested list structure into a linear list with hierarchy info
+        
+        Args:
+            items: List of nested items
+            level: Current nesting level
+            
+        Returns:
+            Flattened list with hierarchy information
+        """
+        flattened = []
+        
+        for item in items:
+            # Add current level info
+            item_copy = item.copy()
+            item_copy['display_level'] = level
+            item_copy['indent_prefix'] = '  ' * level
+            flattened.append(item_copy)
+            
+            # Recursively add children
+            if item.get('children'):
+                child_items = self._flatten_nested_items(item['children'], level + 1)
+                flattened.extend(child_items)
+        
+        return flattened
+    
+    def _visualize_nested_structure(self, items: List[Dict[str, Any]], level: int = 0) -> str:
+        """
+        Create a visual representation of the nested list structure
+        
+        Args:
+            items: List of nested items
+            level: Current nesting level
+            
+        Returns:
+            String representation of the nested structure
+        """
+        result = []
+        
+        for item in items:
+            indent = '  ' * level
+            list_type = item.get('list_type', 'ordered')
+            
+            # Handle bullet points properly
+            if list_type == 'unordered':
+                marker = item['number']  # Use the actual bullet character
+            else:
+                marker = item['number']
+            
+            line = f"{indent}{marker} {item['text']}"
+            if item.get('has_children'):
+                line += f" ({len(item['children'])} children)"
+            
+            result.append(line)
+            
+            # Recursively add children
+            if item.get('children'):
+                child_lines = self._visualize_nested_structure(item['children'], level + 1)
+                result.extend(child_lines)
+        
+        return '\n'.join(result)
     
     def _get_hierarchy_level(self, number: str) -> int:
         """
