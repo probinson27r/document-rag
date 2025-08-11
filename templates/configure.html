@@ -142,6 +142,19 @@
             </div>
         </div>
         
+        <div class="model-section" id="chunkingMethodSection">
+            <label class="model-label" for="chunkingMethodSelect">Document Chunking Method</label>
+            <select class="model-select" id="chunkingMethodSelect">
+                <option value="semantic">Semantic Chunking (Default)</option>
+                <option value="langextract">LangExtract (Google AI)</option>
+                <option value="gpt4">GPT-4 Chunking</option>
+                <option value="traditional">Traditional Chunking</option>
+            </select>
+            <div style="font-size: 11px; color: #6b7280; margin-top: 4px;">
+                Semantic: Preserves document sections and lists | LangExtract: Google's intelligent structure extraction | GPT-4: AI-powered chunking
+            </div>
+        </div>
+        
         <div class="model-section" id="gpt4FeaturesSection">
             <label class="model-label">GPT-4 Extraction Features</label>
             <div style="background: #f9fafb; border-radius: 6px; padding: 12px; margin-bottom: 8px;">
@@ -279,6 +292,10 @@
             const gpt4ModelSelect = document.getElementById('gpt4ModelSelect');
             gpt4ModelSelect.value = data.gpt4_model || 'gpt-4o';
             
+            // Set chunking method
+            const chunkingMethodSelect = document.getElementById('chunkingMethodSelect');
+            chunkingMethodSelect.value = data.chunking?.method || 'semantic';
+            
             // Set feature checkboxes
             document.getElementById('enableTextEnhancement').checked = data.features?.text_enhancement !== false;
             document.getElementById('enableStructuredData').checked = data.features?.structured_data !== false;
@@ -296,6 +313,9 @@
             const config = {
                 extraction_method: document.getElementById('extractionMethodSelect').value,
                 gpt4_model: document.getElementById('gpt4ModelSelect').value,
+                chunking: {
+                    method: document.getElementById('chunkingMethodSelect').value
+                },
                 features: {
                     text_enhancement: document.getElementById('enableTextEnhancement').checked,
                     structured_data: document.getElementById('enableStructuredData').checked,

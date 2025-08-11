@@ -513,9 +513,17 @@ def ingest_document_with_improved_chunking(file_path: str, processing_id: str = 
         # Use the DocumentRAG class with improved chunking
         from document_rag import DocumentRAG
         
+        # Get chunking method from configuration
+        try:
+            extraction_config = session.get('extraction_config', {})
+            chunking_method = extraction_config.get('chunking', {}).get('method', 'semantic')
+        except RuntimeError:
+            # No request context, use default
+            chunking_method = 'semantic'
+        
         # Initialize RAG system with error handling for ChromaDB conflicts
         try:
-            rag = DocumentRAG()
+            rag = DocumentRAG(chunking_method=chunking_method)
         except Exception as chroma_error:
             if "already exists" in str(chroma_error):
                 # If there's a ChromaDB instance conflict, try to use the existing one
@@ -523,7 +531,7 @@ def ingest_document_with_improved_chunking(file_path: str, processing_id: str = 
                 # Wait a moment and try again
                 import time
                 time.sleep(1)
-                rag = DocumentRAG()
+                rag = DocumentRAG(chunking_method=chunking_method)
             else:
                 raise chroma_error
         
@@ -800,7 +808,16 @@ def upload_file():
                     
                     # Use general document processing for other file types
                     from document_rag import DocumentRAG
-                    rag = DocumentRAG()
+                    
+                    # Get chunking method from configuration
+                    try:
+                        extraction_config = session.get('extraction_config', {})
+                        chunking_method = extraction_config.get('chunking', {}).get('method', 'semantic')
+                    except RuntimeError:
+                        # No request context, use default
+                        chunking_method = 'semantic'
+                    
+                    rag = DocumentRAG(chunking_method=chunking_method)
                     result = rag.ingest_document(filepath)
                     
                     if "Successfully ingested" in result:
@@ -2148,7 +2165,7 @@ def api_get_extraction_config():
                 'gpt4_chunking': True  # Enable GPT-4 chunking
             },
             'chunking': {
-                'method': 'improved',  # auto, improved, gpt4, traditional
+                'method': 'semantic',  # semantic, langextract, gpt4, traditional
                 'document_type': 'auto',  # auto, legal, technical, general
                 'preserve_structure': True,
                 'prefer_private_gpt4': True,  # Prefer Private GPT-4 for chunking
@@ -2179,6 +2196,10 @@ def api_save_extraction_config():
         valid_methods = ['auto', 'gpt4_enhanced', 'traditional']
         if data.get('extraction_method') not in valid_methods:
             return jsonify({'error': f'Invalid extraction method. Must be one of: {valid_methods}'}), 400
+        
+        valid_chunking_methods = ['semantic', 'langextract', 'gpt4', 'traditional']
+        if data.get('chunking', {}).get('method') not in valid_chunking_methods:
+            return jsonify({'error': f'Invalid chunking method. Must be one of: {valid_chunking_methods}'}), 400
         
         valid_models = ['gpt-4o', 'gpt-4', 'claude-3-5-sonnet-20241022']
         if data.get('gpt4_model') not in valid_models:
