@@ -49,7 +49,7 @@ jobs:
         mkdir -p deployment/flask_session
         
         # Create deployment script
-        cat > deployment/deploy.sh << 'EOF'
+        cat > deployment/deploy.sh << 'DEPLOYEOF'
         #!/bin/bash
         set -e
         
@@ -82,9 +82,9 @@ jobs:
         # Set proper permissions
         sudo chown -R ubuntu:ubuntu /opt/legal-rag-app
         
-        # Create/update systemd service
+        # Create systemd service file
         echo "⚙️ Setting up systemd service..."
-        sudo tee /etc/systemd/system/legal-rag.service > /dev/null << 'SERVICE_EOF'
+        cat > /tmp/legal-rag.service << 'SERVICEEOF'
 [Unit]
 Description=Legal Document RAG System
 After=network.target
@@ -100,7 +100,10 @@ RestartSec=3
 
 [Install]
 WantedBy=multi-user.target
-SERVICE_EOF
+SERVICEEOF
+        
+        # Install the service file
+        sudo mv /tmp/legal-rag.service /etc/systemd/system/legal-rag.service
         
         # Reload systemd and enable service
         sudo systemctl daemon-reload
@@ -125,7 +128,7 @@ SERVICE_EOF
         fi
         
         echo "✅ Deployment completed!"
-        EOF
+DEPLOYEOF
         
         chmod +x deployment/deploy.sh
         
@@ -176,7 +179,7 @@ SERVICE_EOF
         scp -i ssh_key -o StrictHostKeyChecking=no -o ConnectTimeout=30 deployment.tar.gz "$USER_HOST":/home/ubuntu/
         
         # Execute deployment
-        ssh -i ssh_key -o StrictHostKeyChecking=no -o ConnectTimeout=30 "$USER_HOST" << 'EOF'
+        ssh -i ssh_key -o StrictHostKeyChecking=no -o ConnectTimeout=30 "$USER_HOST" << 'SSHEOF'
           set -e
           
           echo "📦 Extracting deployment package..."
@@ -191,7 +194,7 @@ SERVICE_EOF
           ./deploy.sh
           
           echo "✅ Deployment completed successfully!"
-        EOF
+SSHEOF
         
         # Clean up
         rm -f ssh_key
@@ -205,7 +208,7 @@ SERVICE_EOF
         sleep 30
         
         # Check service and health endpoint
-        ssh -i ssh_key -o StrictHostKeyChecking=no -o ConnectTimeout=30 "$USER_HOST" << 'EOF'
+        ssh -i ssh_key -o StrictHostKeyChecking=no -o ConnectTimeout=30 "$USER_HOST" << 'HEALTHEOF'
           echo "🔍 Checking service status..."
           if sudo systemctl is-active legal-rag >/dev/null; then
             echo "✅ legal-rag service is active"
@@ -233,6 +236,6 @@ SERVICE_EOF
             sudo journalctl -u legal-rag --no-pager -n 20
             exit 1
           fi
-        EOF
+HEALTHEOF
         
         rm -f ssh_key
