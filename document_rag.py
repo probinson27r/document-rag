@@ -607,13 +607,29 @@ class DocumentRAG:
         self.embedding_model = SentenceTransformer(embedding_model)
         self.chroma_db_path = chroma_db_path
 
-        # Character-based chunking
+        # Character-based chunking (fallback)
         self.text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=self.chunk_size,
             chunk_overlap=self.chunk_overlap,
             length_function=len,
             separators=["\n\n", "\n", " ", ""]
         )
+        
+        # Semantic chunking for better section preservation
+        try:
+            from semantic_chunking import SemanticChunker
+            self.semantic_chunker = SemanticChunker(
+                max_chunk_size=2000,
+                min_chunk_size=200,
+                preserve_lists=True,
+                preserve_sections=True
+            )
+            self.use_semantic_chunking = True
+            print("Semantic chunking initialized")
+        except ImportError:
+            self.semantic_chunker = None
+            self.use_semantic_chunking = False
+            print("Semantic chunking not available, using fallback")
         
         # Initialize ChromaDB with same settings as Flask app
         self.chroma_client = chromadb.PersistentClient(
@@ -766,44 +782,107 @@ RESPONSE FORMAT:
                 sys.stdout.flush()
                 return f"Document {doc_data['filename']} contains insufficient text content (less than 50 characters)"
             
-            # Split text into chunks using GPT-4 if available, otherwise fallback to traditional chunking
+            # Split text into chunks using semantic chunking if available, otherwise fallback to traditional chunking
             print("[DEBUG] Splitting text into chunks...")
             
-            # Try GPT-4 chunking first if available
-            gpt4_chunking_result = None
-            if self.document_processor.use_gpt4_chunking and self.document_processor.gpt4_chunker:
+            # Try semantic chunking first if available
+            if self.use_semantic_chunking and self.semantic_chunker:
                 try:
-                    print("[DEBUG] Attempting GPT-4 chunking...")
-                    # Determine document type based on file extension
-                    file_ext = os.path.splitext(doc_data['filename'])[1].lower()
-                    document_type = "legal" if file_ext == '.pdf' else "general"
+                    print("[DEBUG] Attempting semantic chunking...")
+                    semantic_chunks = self.semantic_chunker.chunk_document(doc_data['text'])
                     
-                    gpt4_chunking_result = self.document_processor.chunk_text_with_gpt4(
-                        doc_data['text'], 
-                        document_type=document_type, 
-                        preserve_structure=True,
-                        prefer_private_gpt4=True
-                    )
-                    
-                    if gpt4_chunking_result.get('success') and gpt4_chunking_result.get('chunks'):
-                        print(f"[DEBUG] GPT-4 chunking successful: {len(gpt4_chunking_result['chunks'])} chunks")
-                        chunks = [chunk['content'] for chunk in gpt4_chunking_result['chunks']]
-                        chunking_method = "gpt4_intelligent"
+                    if semantic_chunks:
+                        print(f"[DEBUG] Semantic chunking successful: {len(semantic_chunks)} chunks")
+                        chunks = [chunk.content for chunk in semantic_chunks]
+                        chunking_method = "semantic_intelligent"
+                        
+                        # Store semantic metadata for later use
+                        self.semantic_metadata = {
+                            chunk.chunk_id: {
+                                'section_number': chunk.section_number,
+                                'section_title': chunk.section_title,
+                                'chunk_type': chunk.chunk_type,
+                                'semantic_theme': chunk.semantic_theme,
+                                'list_items': chunk.list_items
+                            } for chunk in semantic_chunks
+                        }
                     else:
-                        print(f"[DEBUG] GPT-4 chunking failed: {gpt4_chunking_result.get('error', 'Unknown error')}")
+                        print("[DEBUG] Semantic chunking failed, trying GPT-4...")
+                        raise Exception("No chunks generated")
+                        
+                except Exception as e:
+                    print(f"[DEBUG] Semantic chunking error: {e}")
+                    # Fallback to GPT-4 chunking
+                    gpt4_chunking_result = None
+                    if self.document_processor.use_gpt4_chunking and self.document_processor.gpt4_chunker:
+                        try:
+                            print("[DEBUG] Attempting GPT-4 chunking...")
+                            # Determine document type based on file extension
+                            file_ext = os.path.splitext(doc_data['filename'])[1].lower()
+                            document_type = "legal" if file_ext == '.pdf' else "general"
+                            
+                            gpt4_chunking_result = self.document_processor.chunk_text_with_gpt4(
+                                doc_data['text'], 
+                                document_type=document_type, 
+                                preserve_structure=True,
+                                prefer_private_gpt4=True
+                            )
+                            
+                            if gpt4_chunking_result.get('success') and gpt4_chunking_result.get('chunks'):
+                                print(f"[DEBUG] GPT-4 chunking successful: {len(gpt4_chunking_result['chunks'])} chunks")
+                                chunks = [chunk['content'] for chunk in gpt4_chunking_result['chunks']]
+                                chunking_method = "gpt4_intelligent"
+                            else:
+                                print(f"[DEBUG] GPT-4 chunking failed: {gpt4_chunking_result.get('error', 'Unknown error')}")
+                                # Fallback to traditional chunking
+                                chunks = self.text_splitter.split_text(doc_data['text'])
+                                chunking_method = "traditional_fallback"
+                                
+                        except Exception as gpt4_error:
+                            print(f"[DEBUG] GPT-4 chunking error: {gpt4_error}")
+                            # Fallback to traditional chunking
+                            chunks = self.text_splitter.split_text(doc_data['text'])
+                            chunking_method = "traditional_fallback"
+                    else:
+                        # Use traditional chunking
+                        chunks = self.text_splitter.split_text(doc_data['text'])
+                        chunking_method = "traditional"
+            else:
+                # Try GPT-4 chunking if available
+                gpt4_chunking_result = None
+                if self.document_processor.use_gpt4_chunking and self.document_processor.gpt4_chunker:
+                    try:
+                        print("[DEBUG] Attempting GPT-4 chunking...")
+                        # Determine document type based on file extension
+                        file_ext = os.path.splitext(doc_data['filename'])[1].lower()
+                        document_type = "legal" if file_ext == '.pdf' else "general"
+                        
+                        gpt4_chunking_result = self.document_processor.chunk_text_with_gpt4(
+                            doc_data['text'], 
+                            document_type=document_type, 
+                            preserve_structure=True,
+                            prefer_private_gpt4=True
+                        )
+                        
+                        if gpt4_chunking_result.get('success') and gpt4_chunking_result.get('chunks'):
+                            print(f"[DEBUG] GPT-4 chunking successful: {len(gpt4_chunking_result['chunks'])} chunks")
+                            chunks = [chunk['content'] for chunk in gpt4_chunking_result['chunks']]
+                            chunking_method = "gpt4_intelligent"
+                        else:
+                            print(f"[DEBUG] GPT-4 chunking failed: {gpt4_chunking_result.get('error', 'Unknown error')}")
+                            # Fallback to traditional chunking
+                            chunks = self.text_splitter.split_text(doc_data['text'])
+                            chunking_method = "traditional_fallback"
+                            
+                    except Exception as e:
+                        print(f"[DEBUG] GPT-4 chunking error: {e}")
                         # Fallback to traditional chunking
                         chunks = self.text_splitter.split_text(doc_data['text'])
                         chunking_method = "traditional_fallback"
-                        
-                except Exception as e:
-                    print(f"[DEBUG] GPT-4 chunking error: {e}")
-                    # Fallback to traditional chunking
+                else:
+                    # Use traditional chunking
                     chunks = self.text_splitter.split_text(doc_data['text'])
-                    chunking_method = "traditional_fallback"
-            else:
-                # Use traditional chunking
-                chunks = self.text_splitter.split_text(doc_data['text'])
-                chunking_method = "traditional"
+                    chunking_method = "traditional"
             
             print(f"[DEBUG] Number of chunks: {len(chunks)} (method: {chunking_method})")
             sys.stdout.flush()
@@ -843,8 +922,30 @@ RESPONSE FORMAT:
                     "chunking_method": chunking_method
                 }
                 
+                # Add semantic chunking metadata if available
+                if chunking_method == "semantic_intelligent" and hasattr(self, 'semantic_metadata'):
+                    semantic_chunk_id = f"chunk_{i+1}" if i < len(chunks) else f"chunk_{i}"
+                    if semantic_chunk_id in self.semantic_metadata:
+                        semantic_info = self.semantic_metadata[semantic_chunk_id]
+                        metadata.update({
+                            "gpt4_chunked": True,
+                            "chunk_type": semantic_info.get('chunk_type', 'semantic'),
+                            "section_number": semantic_info.get('section_number', ''),
+                            "section_title": semantic_info.get('section_title', ''),
+                            "semantic_theme": semantic_info.get('semantic_theme', ''),
+                            "quality_score": 0.9  # High quality for semantic chunks
+                        })
+                    else:
+                        metadata.update({
+                            "gpt4_chunked": True,
+                            "chunk_type": "semantic",
+                            "section_number": "",
+                            "section_title": "",
+                            "semantic_theme": "",
+                            "quality_score": 0.8
+                        })
                 # Add GPT-4 chunking metadata if available
-                if gpt4_chunking_result and gpt4_chunking_result.get('success') and i < len(gpt4_chunking_result.get('chunks', [])):
+                elif 'gpt4_chunking_result' in locals() and gpt4_chunking_result and gpt4_chunking_result.get('success') and i < len(gpt4_chunking_result.get('chunks', [])):
                     gpt4_chunk = gpt4_chunking_result['chunks'][i]
                     metadata.update({
                         "gpt4_chunked": True,
