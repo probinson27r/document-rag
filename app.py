@@ -54,6 +54,14 @@ try:
 except ImportError:
     GPT4_EXTRACTION_AVAILABLE = False
 
+# Import AWS Secrets Manager utilities
+try:
+    from aws_secrets import get_private_gpt4_api_key, get_anthropic_api_key, get_openai_api_key, get_secret_key
+    AWS_SECRETS_AVAILABLE = True
+except ImportError:
+    AWS_SECRETS_AVAILABLE = False
+    logger.warning("AWS Secrets Manager utilities not available, falling back to environment variables")
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -234,7 +242,19 @@ def initialize_rag_system():
             logger.info("No OPENAI_API_KEY found - OpenAI API not available")
         
         # Initialize private GPT-4 client
-        private_gpt4_api_key = os.getenv('PRIVATE_GPT4_API_KEY')
+        private_gpt4_api_key = None
+        if AWS_SECRETS_AVAILABLE:
+            try:
+                private_gpt4_api_key = get_private_gpt4_api_key()
+                logger.info("Retrieved Private GPT-4 API key from AWS Secrets Manager")
+            except Exception as e:
+                logger.warning(f"Failed to retrieve Private GPT-4 API key from AWS Secrets Manager: {e}")
+                # Fallback to environment variable
+                private_gpt4_api_key = os.getenv('PRIVATE_GPT4_API_KEY')
+        else:
+            # Fallback to environment variable
+            private_gpt4_api_key = os.getenv('PRIVATE_GPT4_API_KEY')
+        
         if private_gpt4_api_key:
             private_gpt4_client = {
                 'base_url': private_gpt4_url,
@@ -242,7 +262,7 @@ def initialize_rag_system():
             }
             logger.info("Private GPT-4 client initialized")
         else:
-            logger.info("No PRIVATE_GPT4_API_KEY found - Private GPT-4 API not available")
+            logger.info("No Private GPT-4 API key found in AWS Secrets Manager or environment variables - Private GPT-4 API not available")
         
         try:
             response = requests.get('http://localhost:1337/v1/models', timeout=5)

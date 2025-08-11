@@ -669,22 +669,36 @@ Extract all sections, lists, and key information while preserving the document's
         current_number = current_item['number']
         previous_number = previous_item['number']
         
-        # Rule 1: Lettered items (a, b, c) should be nested under numbered items
+        # Get hierarchy levels for comparison
+        current_level = self._get_hierarchy_level(current_number)
+        previous_level = self._get_hierarchy_level(previous_number)
+        
+        # Rule 1: If current item has higher hierarchy level than previous, it should be nested
+        if current_level > previous_level:
+            return True
+        
+        # Rule 2: Same level items of the same type should be siblings (not nested)
+        if current_level == previous_level:
+            return False
+        
+        # Rule 3: Special cases for mixed list types
+        # Lettered items (a, b, c) should be nested under numbered items
         if (current_number.isalpha() and current_number.islower() and 
             previous_number.isdigit()):
             return True
         
-        # Rule 2: Consecutive lettered items (a, b, c) should be nested under the same numbered parent
-        if (current_number.isalpha() and current_number.islower() and 
+        # Roman numerals (i, ii, iii) should be nested under lettered items
+        roman_lower = ['i', 'ii', 'iii', 'iv', 'v', 'vi', 'vii', 'viii', 'ix', 'x']
+        if (current_number.lower() in roman_lower and 
             previous_number.isalpha() and previous_number.islower()):
             return True
         
-        # Rule 3: Roman numerals (i, ii, iii) should be nested under previous items
-        roman_lower = ['i', 'ii', 'iii', 'iv', 'v', 'vi', 'vii', 'viii', 'ix', 'x']
-        if current_number.lower() in roman_lower:
+        # Uppercase letters (A, B, C) should be nested under Roman numerals
+        if (current_number.isalpha() and current_number.isupper() and 
+            previous_number.lower() in roman_lower):
             return True
         
-        # Rule 4: Bullet points should be nested under previous items if they follow immediately
+        # Bullet points should be nested under previous items
         if current_number in ['-', '*', '•']:
             return True
         
@@ -693,7 +707,7 @@ Extract all sections, lists, and key information while preserving the document's
     def _find_semantic_parent(self, item: Dict[str, Any], raw_items: List[Dict[str, Any]], 
                              current_index: int, item_stack: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
         """
-        Find the appropriate semantic parent for an item
+        Find the appropriate semantic parent for an item based on hierarchy levels
         
         Args:
             item: Current item to find parent for
@@ -705,27 +719,39 @@ Extract all sections, lists, and key information while preserving the document's
             Parent item or None
         """
         current_number = item['number']
+        current_level = self._get_hierarchy_level(current_number)
         
-        # For lettered items, find the most recent numbered item
-        if current_number.isalpha() and current_number.islower():
-            # Look backwards through raw_items to find the most recent numbered item
-            for j in range(current_index - 1, -1, -1):
-                previous_item = raw_items[j]
-                if previous_item['number'].isdigit():
-                    # Find this numbered item in the stack
-                    for stack_item in reversed(item_stack):
-                        if (stack_item['line_number'] == previous_item['line_number'] and 
-                            stack_item['indentation'] == previous_item['indentation']):
-                            return stack_item
-                    break
+        # Look backwards through raw_items to find the appropriate parent
+        for j in range(current_index - 1, -1, -1):
+            previous_item = raw_items[j]
+            previous_level = self._get_hierarchy_level(previous_item['number'])
+            
+            # Find the first item with a lower hierarchy level
+            if previous_level < current_level:
+                # Find this item in the stack
+                for stack_item in reversed(item_stack):
+                    if (stack_item['line_number'] == previous_item['line_number'] and 
+                        stack_item['indentation'] == previous_item['indentation']):
+                        return stack_item
+                break
         
-        # For other semantic nesting, use the previous item
-        if current_index > 0:
-            previous_item = raw_items[current_index - 1]
-            for stack_item in reversed(item_stack):
-                if (stack_item['line_number'] == previous_item['line_number'] and 
-                    stack_item['indentation'] == previous_item['indentation']):
-                    return stack_item
+        # If no suitable parent found, look for the most recent item at the same level
+        # This handles cases where we need to find a sibling's parent
+        for j in range(current_index - 1, -1, -1):
+            previous_item = raw_items[j]
+            previous_level = self._get_hierarchy_level(previous_item['number'])
+            
+            if previous_level == current_level:
+                # Find the parent of this sibling
+                for stack_item in reversed(item_stack):
+                    if (stack_item['line_number'] == previous_item['line_number'] and 
+                        stack_item['indentation'] == previous_item['indentation']):
+                        # Find the parent of this stack item
+                        for parent_stack_item in reversed(item_stack):
+                            if parent_stack_item.get('children') and stack_item in parent_stack_item['children']:
+                                return parent_stack_item
+                        break
+                break
         
         return None
     
@@ -812,24 +838,28 @@ Extract all sections, lists, and key information while preserving the document's
         roman_lower = ['i', 'ii', 'iii', 'iv', 'v', 'vi', 'vii', 'viii', 'ix', 'x']
         roman_upper = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X']
         
-        if number.lower() in roman_lower:
-            return 2
-        elif number in roman_upper:
-            return 2
+        # Hierarchy levels (from lowest to highest):
+        # Level 1: Numbers (1, 2, 3) - Top level
+        # Level 2: Lowercase letters (a, b, c) - Second level
+        # Level 3: Roman numerals (i, ii, iii) - Third level
+        # Level 4: Uppercase letters (A, B, C) - Fourth level
+        # Level 5: Bullet points (-, *, •) - Can be at any level
         
-        # Handle bullet points
-        if number in ['-', '*', '•']:
-            return 1
-        
-        # Handle numbered patterns
         if number.isdigit():
-            return 1
+            return 1  # Top level
         
-        # Handle letter patterns
-        if number.isupper():
-            return 2
-        elif number.islower():
-            return 3
+        if number.isalpha() and number.islower():
+            # Check if it's a Roman numeral first
+            if number.lower() in roman_lower:
+                return 3  # Third level
+            return 2  # Second level (regular lowercase letters)
+        
+        if number.isalpha() and number.isupper():
+            return 4  # Fourth level
+        
+        # Handle bullet points - they can be at any level, so we'll treat them as flexible
+        if number in ['-', '*', '•']:
+            return 2  # Default to second level, but will be adjusted by semantic rules
         
         # Handle decimal patterns like "1.1", "1.1.1"
         if '.' in number and number.replace('.', '').isdigit():

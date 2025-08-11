@@ -1,0 +1,153 @@
+name: Deploy to EC2
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  AWS_REGION: ap-southeast-2
+  EC2_INSTANCE_ID: ${{ secrets.EC2_INSTANCE_ID }}
+  SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pytest
+    
+    - name: Run tests
+      run: |
+        python -m pytest tests/ -v
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+    
+    - name: Create deployment package
+      run: |
+        # Create deployment directory
+        mkdir -p deployment
+        cp -r app.py document_rag.py hybrid_search.py legal_document_rag.py deployment/
+        cp -r templates static deployment/
+        cp requirements.txt deployment/
+        cp -r cognito_auth.py aws_secrets.py export_utils.py deployment/
+        cp -r gpt4_chunking.py gpt4_extraction.py semantic_chunking.py langextract_chunking.py deployment/
+        cp -r cli.py flask_app.py deployment/
+        
+        # Create necessary directories
+        mkdir -p deployment/uploads
+        mkdir -p deployment/chroma_db
+        mkdir -p deployment/flask_session
+        
+        # Create deployment script
+        cat > deployment/deploy.sh << 'EOF'
+        #!/bin/bash
+        set -e
+        
+        echo "🚀 Starting deployment..."
+        
+        # Stop existing application
+        if pgrep -f "python.*app.py" > /dev/null; then
+            echo "🛑 Stopping existing application..."
+            pkill -f "python.*app.py" || true
+            sleep 5
+        fi
+        
+        # Install/update dependencies
+        echo "📦 Installing dependencies..."
+        pip install -r requirements.txt
+        
+        # Set up environment
+        echo "🔧 Setting up environment..."
+        export FLASK_ENV=production
+        export FLASK_APP=app.py
+        
+        # Start application
+        echo "🚀 Starting application..."
+        nohup python app.py > app.log 2>&1 &
+        echo $! > app.pid
+        
+        echo "✅ Deployment completed!"
+        echo "📋 Application PID: $(cat app.pid)"
+        echo "📄 Logs: tail -f app.log"
+        EOF
+        
+        chmod +x deployment/deploy.sh
+        
+        # Create tar.gz
+        tar -czf deployment.tar.gz deployment/
+    
+    - name: Deploy to EC2
+      run: |
+        # Create SSH key file
+        echo "${{ secrets.SSH_PRIVATE_KEY }}" > ssh_key
+        chmod 600 ssh_key
+        
+        # Copy deployment package
+        scp -i ssh_key -o StrictHostKeyChecking=no deployment.tar.gz ubuntu@${{ secrets.EC2_INSTANCE_IP }}:/home/ubuntu/
+        
+        # Execute deployment
+        ssh -i ssh_key -o StrictHostKeyChecking=no ubuntu@${{ secrets.EC2_INSTANCE_IP }} << 'EOF'
+          set -e
+          
+          echo "📦 Extracting deployment package..."
+          tar -xzf deployment.tar.gz
+          
+          echo "🔄 Updating application..."
+          sudo rm -rf /opt/legal-rag-app
+          sudo mv deployment /opt/legal-rag-app
+          sudo chown -R ubuntu:ubuntu /opt/legal-rag-app
+          
+          cd /opt/legal-rag-app
+          ./deploy.sh
+          
+          echo "✅ Deployment completed successfully!"
+        EOF
+        
+        # Clean up
+        rm -f ssh_key
+    
+    - name: Health check
+      run: |
+        echo "${{ secrets.SSH_PRIVATE_KEY }}" > ssh_key
+        chmod 600 ssh_key
+        
+        # Wait for application to start
+        sleep 30
+        
+        # Check if application is running
+        ssh -i ssh_key -o StrictHostKeyChecking=no ubuntu@${{ secrets.EC2_INSTANCE_IP }} << 'EOF'
+          if pgrep -f "python.*app.py" > /dev/null; then
+            echo "✅ Application is running"
+            curl -f http://localhost:5001/health || echo "❌ Health check failed"
+          else
+            echo "❌ Application is not running"
+            exit 1
+          fi
+        EOF
+        
+        rm -f ssh_key

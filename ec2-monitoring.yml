@@ -1,0 +1,224 @@
+# CloudWatch Monitoring Configuration for EC2 Legal Document RAG System
+# This file contains monitoring and alerting configurations
+
+# EC2 Instance Monitoring
+EC2_Monitoring:
+  InstanceId: ${EC2_INSTANCE_ID}
+  Metrics:
+    - CPUUtilization
+    - NetworkIn
+    - NetworkOut
+    - DiskReadOps
+    - DiskWriteOps
+    - DiskReadBytes
+    - DiskWriteBytes
+    - StatusCheckFailed
+    - StatusCheckFailed_Instance
+    - StatusCheckFailed_System
+
+# Application Monitoring
+Application_Monitoring:
+  LogGroups:
+    - /opt/legal-rag-app/logs/app.log
+    - /opt/legal-rag-app/logs/monitor.log
+  Metrics:
+    - ApplicationResponseTime
+    - RequestCount
+    - ErrorCount
+    - ActiveConnections
+
+# Alerts Configuration
+Alerts:
+  HighCPU:
+    Threshold: 80
+    Period: 300
+    EvaluationPeriods: 2
+    ComparisonOperator: GreaterThanThreshold
+    Actions:
+      - SNS_TOPIC_ARN
+    
+  HighMemory:
+    Threshold: 85
+    Period: 300
+    EvaluationPeriods: 2
+    ComparisonOperator: GreaterThanThreshold
+    Actions:
+      - SNS_TOPIC_ARN
+    
+  DiskSpace:
+    Threshold: 90
+    Period: 300
+    EvaluationPeriods: 2
+    ComparisonOperator: GreaterThanThreshold
+    Actions:
+      - SNS_TOPIC_ARN
+    
+  ApplicationDown:
+    Threshold: 0
+    Period: 60
+    EvaluationPeriods: 1
+    ComparisonOperator: LessThanThreshold
+    Actions:
+      - SNS_TOPIC_ARN
+
+# Dashboard Configuration
+Dashboard:
+  Name: "Legal-Document-RAG-Monitoring"
+  Widgets:
+    - Type: "metric"
+      Properties:
+        Metrics:
+          - ["AWS/EC2", "CPUUtilization", "InstanceId", "${EC2_INSTANCE_ID}"]
+        Period: 300
+        Stat: "Average"
+        Region: "ap-southeast-2"
+        Title: "CPU Utilization"
+    
+    - Type: "metric"
+      Properties:
+        Metrics:
+          - ["AWS/EC2", "NetworkIn", "InstanceId", "${EC2_INSTANCE_ID}"]
+          - [".", "NetworkOut", ".", "."]
+        Period: 300
+        Stat: "Average"
+        Region: "ap-southeast-2"
+        Title: "Network Traffic"
+    
+    - Type: "metric"
+      Properties:
+        Metrics:
+          - ["AWS/EC2", "DiskReadOps", "InstanceId", "${EC2_INSTANCE_ID}"]
+          - [".", "DiskWriteOps", ".", "."]
+        Period: 300
+        Stat: "Average"
+        Region: "ap-southeast-2"
+        Title: "Disk Operations"
+
+# Log Filtering
+LogFilters:
+  ErrorLogs:
+    Pattern: "ERROR"
+    MetricName: "ErrorCount"
+    MetricValue: "1"
+    
+  ApplicationLogs:
+    Pattern: "INFO"
+    MetricName: "InfoCount"
+    MetricValue: "1"
+
+# Custom Metrics
+CustomMetrics:
+  ApplicationHealth:
+    Namespace: "LegalDocumentRAG"
+    MetricName: "ApplicationHealth"
+    Value: "1"
+    Unit: "Count"
+    
+  DocumentProcessingTime:
+    Namespace: "LegalDocumentRAG"
+    MetricName: "DocumentProcessingTime"
+    Unit: "Seconds"
+    
+  ActiveUsers:
+    Namespace: "LegalDocumentRAG"
+    MetricName: "ActiveUsers"
+    Unit: "Count"
+
+# SNS Topic Configuration
+SNSTopic:
+  Name: "Legal-Document-RAG-Alerts"
+  Subscriptions:
+    - Protocol: "email"
+      Endpoint: "your-email@example.com"
+    - Protocol: "sms"
+      Endpoint: "+1234567890"
+
+# CloudWatch Agent Configuration
+CloudWatchAgent:
+  Config:
+    agent:
+      metrics_collection_interval: 60
+      region: "ap-southeast-2"
+      debug: false
+    
+    metrics:
+      namespace: "LegalDocumentRAG"
+      metrics_collected:
+        cpu:
+          resources: ["*"]
+          totalcpu: true
+          measurement: ["cpu_usage_idle", "cpu_usage_iowait", "cpu_usage_user", "cpu_usage_system"]
+        disk:
+          resources: ["/"]
+          measurement: ["used_percent"]
+        diskio:
+          resources: ["*"]
+          measurement: ["io_time"]
+        mem:
+          measurement: ["mem_used_percent"]
+        netstat:
+          measurement: ["tcp_established", "tcp_time_wait"]
+        swap:
+          measurement: ["swap_used_percent"]
+    
+    logs:
+      logs_collected:
+        files:
+          collect_list:
+            - file_path: "/opt/legal-rag-app/logs/app.log"
+              log_group_name: "/opt/legal-rag-app/logs/app.log"
+              log_stream_name: "{instance_id}"
+              time_format: "%Y-%m-%d %H:%M:%S"
+            - file_path: "/opt/legal-rag-app/logs/monitor.log"
+              log_group_name: "/opt/legal-rag-app/logs/monitor.log"
+              log_stream_name: "{instance_id}"
+              time_format: "%Y-%m-%d %H:%M:%S"
+            - file_path: "/var/log/nginx/access.log"
+              log_group_name: "/var/log/nginx/access.log"
+              log_stream_name: "{instance_id}"
+            - file_path: "/var/log/nginx/error.log"
+              log_group_name: "/var/log/nginx/error.log"
+              log_stream_name: "{instance_id}"
+
+# Auto Scaling Configuration (if needed)
+AutoScaling:
+  Enabled: false
+  MinInstances: 1
+  MaxInstances: 3
+  ScaleUpThreshold: 80
+  ScaleDownThreshold: 30
+  ScaleUpCooldown: 300
+  ScaleDownCooldown: 300
+
+# Backup Configuration
+Backup:
+  Schedule: "cron(0 2 * * ? *)"  # Daily at 2 AM
+  RetentionDays: 7
+  StorageClass: "STANDARD_IA"
+  Encryption: true
+
+# Security Configuration
+Security:
+  VPC:
+    VpcId: "${VPC_ID}"
+    SubnetIds: ["${SUBNET_ID}"]
+  SecurityGroups:
+    - GroupId: "${SECURITY_GROUP_ID}"
+      Description: "Legal Document RAG Security Group"
+  IAMRole:
+    RoleName: "LegalDocumentRAG-EC2-Role"
+    Policies:
+      - CloudWatchAgentServerPolicy
+      - AmazonSSMManagedInstanceCore
+      - SecretsManagerReadWrite
+
+# Cost Optimization
+CostOptimization:
+  InstanceType: "t3.large"
+  ReservedInstance: false
+  SpotInstance: false
+  AutoStop: false
+  Scheduler:
+    StartTime: "09:00"
+    StopTime: "18:00"
+    Timezone: "UTC"

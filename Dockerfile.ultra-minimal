@@ -1,4 +1,4 @@
-# Ultra-minimal multi-stage build optimized for private-GPT only
+# Ultra-minimal multi-stage build for private-GPT only
 # Stage 1: Build stage with minimal dependencies
 FROM python:3.11-slim as builder
 
@@ -13,8 +13,8 @@ RUN apt-get update && apt-get install -y \
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
-# Copy full requirements and install Python dependencies
-COPY requirements.txt requirements.txt
+# Copy ultra-minimal requirements and install Python dependencies
+COPY requirements-ultra-minimal.txt requirements.txt
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
@@ -60,4 +60,4 @@ HEALTHCHECK --interval=30s --timeout=30s --start-period=60s --retries=5 \
     CMD curl -f http://localhost:5001/health || exit 1
 
 # Run the application
-CMD ["python", "app.py"] 
+CMD ["python", "app.py"]
