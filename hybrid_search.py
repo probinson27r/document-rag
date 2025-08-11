@@ -455,6 +455,11 @@ class HybridSearch:
         if is_list and section_numbers:
             self.logger.info(f"List query detected for sections: {section_numbers}")
             
+            # Check if this is a Section 3.2 objectives query (special handling for chunking issues)
+            if '3.2' in section_numbers and is_objectives:
+                self.logger.info("Section 3.2 objectives query detected - using enhanced reconstruction")
+                return self.enhanced_section_search(section_numbers[0], query, n_results)
+            
             # Use enhanced list search
             list_results = self.list_enhanced_search(query, section_numbers, n_results * 2)
             if list_results:
@@ -554,6 +559,208 @@ class HybridSearch:
             # Fallback to more permissive search
             self.logger.info("No semantic results, trying more permissive search")
             return self.semantic_search(query, n_results, distance_threshold=0.9)
+    
+    def enhanced_section_search(self, section_number: str, query: str, n_results: int = 10) -> List[Dict]:
+        """
+        Enhanced search for section-specific queries that reconstructs complete sections
+        
+        Args:
+            section_number: Section number (e.g., "3.2")
+            query: Original query
+            n_results: Number of results to return
+            
+        Returns:
+            List of search results with reconstructed section content
+        """
+        print(f"Enhanced section search for section {section_number}")
+        
+        # Find all chunks related to this section
+        section_chunks = self.find_all_section_chunks(section_number)
+        
+        if not section_chunks:
+            print(f"Warning: No chunks found for section {section_number}")
+            return self.semantic_search(query, n_results)
+        
+        # Reconstruct the complete section
+        reconstructed_content = self.reconstruct_section_content(section_number, section_chunks, query)
+        
+        # Return the reconstructed content as the primary result
+        primary_result = {
+            'id': f'reconstructed_section_{section_number}',
+            'text': reconstructed_content,
+            'distance': 0.0,
+            'search_type': 'reconstructed_section',
+            'combined_score': 1.0,
+            'source_chunks': len(section_chunks)
+        }
+        
+        # Also include individual chunks as additional results
+        additional_results = []
+        for chunk in section_chunks[:n_results-1]:
+            additional_results.append({
+                'id': chunk.get('id', 'unknown'),
+                'text': chunk['content'],
+                'distance': chunk.get('distance', 0.5),
+                'search_type': 'section_chunk',
+                'combined_score': chunk.get('relevance_score', 0.5)
+            })
+        
+        return [primary_result] + additional_results
+    
+    def find_all_section_chunks(self, section_number: str) -> List[Dict]:
+        """
+        Find all chunks related to a specific section
+        
+        Args:
+            section_number: Section number to search for
+            
+        Returns:
+            List of related chunks
+        """
+        search_patterns = [
+            f"Section {section_number}",
+            f"## {section_number}",
+            f"{section_number} ",
+            f"clause {section_number}",
+            f"paragraph {section_number}",
+            f"{section_number} List",
+            f"{section_number} objectives",
+            f"objectives of this Agreement",
+            f"Agreement are to",
+            f"(a) The objectives"
+        ]
+        
+        all_chunks = {}
+        
+        for pattern in search_patterns:
+            try:
+                results = self.collection.query(
+                    query_texts=[pattern],
+                    n_results=20,
+                    include=['documents', 'metadatas', 'distances']
+                )
+                
+                for doc, metadata, distance in zip(
+                    results['documents'][0], 
+                    results['metadatas'][0],
+                    results['distances'][0]
+                ):
+                    # Check if this chunk is relevant to the section
+                    is_relevant = (
+                        section_number in doc or 
+                        ('objective' in doc.lower() and any(marker in doc for marker in ['(a)', '(b)', '(c)', '(d)', '(e)', '(i)', '(ii)', '(iii)', '(iv)', '(v)']))
+                    )
+                    
+                    if is_relevant:
+                        chunk_id = metadata.get('chunk_id', f'chunk_{hash(doc[:50])}')
+                        all_chunks[chunk_id] = {
+                            'id': chunk_id,
+                            'content': doc,
+                            'metadata': metadata,
+                            'distance': distance,
+                            'relevance_score': 1.0 - distance
+                        }
+            except Exception as e:
+                print(f"Warning: Error searching for pattern {pattern}: {e}")
+                continue
+        
+        # Sort by relevance
+        sorted_chunks = sorted(all_chunks.values(), key=lambda x: x['relevance_score'], reverse=True)
+        
+        print(f"Found {len(sorted_chunks)} chunks for section {section_number}")
+        return sorted_chunks
+    
+    def reconstruct_section_content(self, section_number: str, chunks: List[Dict], query: str) -> str:
+        """
+        Reconstruct complete section content from multiple chunks
+        
+        Args:
+            section_number: Section number
+            chunks: List of related chunks
+            query: Original query for context
+            
+        Returns:
+            Reconstructed section content
+        """
+        # Collect all content related to this section
+        section_header = ""
+        objectives_content = []
+        other_content = []
+        
+        for chunk in chunks:
+            content = chunk['content']
+            lines = content.split('\n')
+            
+            for line in lines:
+                line_clean = line.strip()
+                
+                # Look for section header
+                if section_number in line_clean and any(keyword in line_clean.lower() for keyword in ['objective', 'list', 'List']):
+                    if not section_header or len(line_clean) > len(section_header):
+                        section_header = line_clean.replace('..........', '').replace('....', '').strip()
+                
+                # Look for enumerated objectives (a), (b), (c), etc. and (i), (ii), (iii), etc.
+                if re.match(r'\([a-z]+\)', line_clean) or re.match(r'\([ivxlc]+\)', line_clean):
+                    if line_clean not in objectives_content:
+                        objectives_content.append(line_clean)
+                
+                # Look for objectives introduction
+                elif 'objectives of this Agreement are to' in line_clean:
+                    if line_clean not in objectives_content:
+                        objectives_content.append(line_clean)
+                
+                # Look for other objective-related content
+                elif 'objective' in line_clean.lower() and section_number in content and len(line_clean) > 20:
+                    if line_clean not in other_content and not line_clean.startswith('#'):
+                        other_content.append(line_clean)
+        
+        # Build the reconstructed content
+        result_parts = []
+        
+        if section_header:
+            result_parts.append(f"**{section_header}**")
+            result_parts.append("")
+        
+        if 'objective' in query.lower() and objectives_content:
+            result_parts.append("The objectives listed in Section 3.2 are:")
+            result_parts.append("")
+            
+            # Sort objectives to try to get them in order (a, b, c, then i, ii, iii)
+            letter_objectives = [obj for obj in objectives_content if re.match(r'\([a-z]\)', obj)]
+            roman_objectives = [obj for obj in objectives_content if re.match(r'\([ivxlc]+\)', obj)]
+            intro_objectives = [obj for obj in objectives_content if 'Agreement are to' in obj]
+            
+            letter_objectives.sort()
+            roman_objectives.sort()
+            
+            # Add intro first
+            for obj in intro_objectives:
+                result_parts.append(f"• {obj}")
+            
+            # Add letter objectives
+            for obj in letter_objectives:
+                result_parts.append(f"• {obj}")
+            
+            # Add roman numeral objectives  
+            for obj in roman_objectives:
+                result_parts.append(f"• {obj}")
+            
+            result_parts.append("")
+        
+        if other_content:
+            for content in other_content[:3]:  # Limit to avoid too much content
+                result_parts.append(content)
+        
+        # If we couldn't reconstruct well, fall back to combining chunk content
+        reconstructed = '\n'.join(result_parts).strip()
+        if not reconstructed or len(reconstructed) < 100:
+            print("Falling back to chunk combination")
+            combined_content = []
+            for chunk in chunks[:3]:  # Use top 3 most relevant chunks
+                combined_content.append(chunk['content'])
+            return '\n\n─────\n\n'.join(combined_content)
+        
+        return reconstructed
 
 # Example usage and testing
 if __name__ == "__main__":
