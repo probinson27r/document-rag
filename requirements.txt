@@ -17,3 +17,4 @@ sentence-transformers
 boto3
 PyJWT
 cryptography
+numpy<2.0.0
