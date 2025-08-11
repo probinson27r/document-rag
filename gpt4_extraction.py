@@ -16,6 +16,7 @@ import logging
 import time
 import asyncio
 import concurrent.futures
+import tiktoken
 from typing import Dict, List, Any, Optional
 from pathlib import Path
 import openai
@@ -49,6 +50,26 @@ class GPT4Extractor:
         self.private_gpt4_url = private_gpt4_url
         self.private_gpt4_key = private_gpt4_key
         
+        # Initialize token encoder for GPT-4
+        try:
+            self.encoder = tiktoken.encoding_for_model("gpt-4")
+        except Exception:
+            # Fallback to cl100k_base encoding used by GPT-4
+            self.encoder = tiktoken.get_encoding("cl100k_base")
+        
+        # Context limits for different models
+        self.context_limits = {
+            "gpt-4": 8192,
+            "gpt-4-32k": 32768,
+            "gpt-4o": 128000,
+            "gpt-5": 128000,
+            "claude-3-5-sonnet-20241022": 200000,
+            "claude-3-haiku": 200000
+        }
+        
+        # Reserve tokens for system prompt and response
+        self.reserved_tokens = 2000
+        
         # Initialize OpenAI client
         if openai_api_key:
             openai.api_key = openai_api_key
@@ -66,6 +87,113 @@ class GPT4Extractor:
         
         if not any([self.openai_client, self.claude_client, private_gpt4_url]):
             logger.warning("No GPT-4 clients available - extraction will use fallback methods")
+    
+    def count_tokens(self, text: str) -> int:
+        """Count tokens in text using the GPT-4 tokenizer"""
+        try:
+            return len(self.encoder.encode(text))
+        except Exception as e:
+            logger.warning(f"Token counting failed: {e}, using character-based estimation")
+            # Fallback: rough estimation (1 token ≈ 4 characters)
+            return len(text) // 4
+    
+    def get_context_limit(self, model: str) -> int:
+        """Get context limit for a model"""
+        return self.context_limits.get(model, 128000)
+    
+    def chunk_text_for_model(self, text: str, prompt: str, model: str = "gpt-5") -> List[str]:
+        """
+        Chunk text to fit within model context limits
+        
+        Args:
+            text: Text to chunk
+            prompt: System prompt that will be used
+            model: Model name to get context limit
+            
+        Returns:
+            List of text chunks that fit within context limits
+        """
+        context_limit = self.get_context_limit(model)
+        max_text_tokens = context_limit - self.reserved_tokens
+        
+        # Count tokens in prompt
+        prompt_tokens = self.count_tokens(prompt)
+        available_tokens = max_text_tokens - prompt_tokens
+        
+        logger.info(f"Model: {model}, Context limit: {context_limit}, Available for text: {available_tokens}")
+        
+        # Count tokens in full text
+        total_tokens = self.count_tokens(text)
+        logger.info(f"Input text tokens: {total_tokens}")
+        
+        if total_tokens <= available_tokens:
+            logger.info("Text fits within context limit, no chunking needed")
+            return [text]
+        
+        # Need to chunk the text
+        logger.info(f"Text exceeds context limit, chunking into smaller pieces")
+        chunks = []
+        
+        # Split text into paragraphs first (better for preserving context)
+        paragraphs = text.split('\n\n')
+        current_chunk = ""
+        current_tokens = 0
+        
+        for paragraph in paragraphs:
+            paragraph_tokens = self.count_tokens(paragraph)
+            
+            # If single paragraph is too large, split by sentences
+            if paragraph_tokens > available_tokens:
+                # Split large paragraph into sentences
+                sentences = paragraph.split('. ')
+                for i, sentence in enumerate(sentences):
+                    if i < len(sentences) - 1:
+                        sentence += '. '  # Re-add period except for last sentence
+                    
+                    sentence_tokens = self.count_tokens(sentence)
+                    
+                    if current_tokens + sentence_tokens > available_tokens:
+                        if current_chunk.strip():
+                            chunks.append(current_chunk.strip())
+                            current_chunk = sentence
+                            current_tokens = sentence_tokens
+                        else:
+                            # Single sentence is too large, truncate it
+                            words = sentence.split()
+                            truncated_sentence = ""
+                            for word in words:
+                                test_sentence = truncated_sentence + " " + word if truncated_sentence else word
+                                if self.count_tokens(test_sentence) < available_tokens:
+                                    truncated_sentence = test_sentence
+                                else:
+                                    break
+                            chunks.append(truncated_sentence.strip())
+                    else:
+                        current_chunk += " " + sentence if current_chunk else sentence
+                        current_tokens += sentence_tokens
+            else:
+                # Check if adding this paragraph would exceed limit
+                if current_tokens + paragraph_tokens > available_tokens:
+                    if current_chunk.strip():
+                        chunks.append(current_chunk.strip())
+                        current_chunk = paragraph
+                        current_tokens = paragraph_tokens
+                    else:
+                        chunks.append(paragraph)
+                else:
+                    current_chunk += "\n\n" + paragraph if current_chunk else paragraph
+                    current_tokens += paragraph_tokens
+        
+        # Add the last chunk if it has content
+        if current_chunk.strip():
+            chunks.append(current_chunk.strip())
+        
+        logger.info(f"Split text into {len(chunks)} chunks")
+        for i, chunk in enumerate(chunks):
+            tokens = self.count_tokens(chunk)
+            logger.info(f"Chunk {i+1}: {tokens} tokens")
+        
+        return chunks
     
     def extract_with_gpt4(self, 
                          text: str, 
@@ -236,7 +364,7 @@ class GPT4Extractor:
     
     def enhance_text_extraction(self, raw_text: str, file_type: str, prefer_private_gpt4: bool = True) -> Dict[str, Any]:
         """
-        Enhance text extraction using GPT-4
+        Enhance text extraction using GPT-4 with automatic chunking for large documents
         
         Args:
             raw_text: Raw extracted text
@@ -276,7 +404,114 @@ class GPT4Extractor:
         }}
         """
         
-        return self.extract_with_gpt4(raw_text, prompt, "gpt-5", prefer_private_gpt4=prefer_private_gpt4)
+        return self._extract_with_chunking(raw_text, prompt, "gpt-5", prefer_private_gpt4=prefer_private_gpt4)
+    
+    def _extract_with_chunking(self, text: str, prompt: str, model: str = "gpt-5", prefer_private_gpt4: bool = True) -> Dict[str, Any]:
+        """
+        Extract data with automatic chunking if text is too large
+        
+        Args:
+            text: Text to process
+            prompt: Extraction prompt
+            model: Model to use
+            prefer_private_gpt4: Whether to prefer private GPT-4
+            
+        Returns:
+            Combined extraction results
+        """
+        # Check if chunking is needed
+        chunks = self.chunk_text_for_model(text, prompt, model)
+        
+        if len(chunks) == 1:
+            # No chunking needed, process normally
+            return self.extract_with_gpt4(text, prompt, model, max_tokens=4000, prefer_private_gpt4=prefer_private_gpt4)
+        
+        # Process multiple chunks and combine results
+        logger.info(f"Processing document in {len(chunks)} chunks")
+        
+        all_enhanced_text = []
+        combined_metadata = {
+            "title": "",
+            "author": "",
+            "date": "",
+            "document_type": "",
+            "purpose": "",
+            "sections": [],
+            "tables": [],
+            "lists": []
+        }
+        quality_scores = []
+        processing_notes = []
+        
+        for i, chunk in enumerate(chunks):
+            logger.info(f"Processing chunk {i+1}/{len(chunks)}")
+            
+            # Add chunk context to prompt
+            chunk_prompt = f"""
+            {prompt}
+            
+            NOTE: This is chunk {i+1} of {len(chunks)} from a larger document. 
+            Focus on processing this section while maintaining awareness that it's part of a larger document.
+            """
+            
+            result = self.extract_with_gpt4(chunk, chunk_prompt, model, max_tokens=4000, prefer_private_gpt4=prefer_private_gpt4)
+            
+            if result.get("success") and result.get("extracted_data"):
+                data = result["extracted_data"]
+                
+                # Collect enhanced text
+                if "enhanced_text" in data:
+                    all_enhanced_text.append(data["enhanced_text"])
+                
+                # Merge metadata
+                if "metadata" in data:
+                    metadata = data["metadata"]
+                    
+                    # Take first non-empty title, author, etc.
+                    if not combined_metadata["title"] and metadata.get("title"):
+                        combined_metadata["title"] = metadata["title"]
+                    if not combined_metadata["author"] and metadata.get("author"):
+                        combined_metadata["author"] = metadata["author"]
+                    if not combined_metadata["date"] and metadata.get("date"):
+                        combined_metadata["date"] = metadata["date"]
+                    if not combined_metadata["document_type"] and metadata.get("document_type"):
+                        combined_metadata["document_type"] = metadata["document_type"]
+                    if not combined_metadata["purpose"] and metadata.get("purpose"):
+                        combined_metadata["purpose"] = metadata["purpose"]
+                    
+                    # Extend lists
+                    if metadata.get("sections"):
+                        combined_metadata["sections"].extend(metadata["sections"])
+                    if metadata.get("tables"):
+                        combined_metadata["tables"].extend(metadata["tables"])
+                    if metadata.get("lists"):
+                        combined_metadata["lists"].extend(metadata["lists"])
+                
+                # Collect quality scores and notes
+                if "quality_score" in data:
+                    quality_scores.append(data["quality_score"])
+                if "processing_notes" in data:
+                    processing_notes.append(f"Chunk {i+1}: {data['processing_notes']}")
+            else:
+                logger.warning(f"Failed to process chunk {i+1}: {result.get('error', 'Unknown error')}")
+                all_enhanced_text.append(chunk)  # Use original chunk as fallback
+        
+        # Combine results
+        combined_enhanced_text = "\n\n".join(all_enhanced_text)
+        average_quality = sum(quality_scores) / len(quality_scores) if quality_scores else 0.0
+        combined_notes = "; ".join(processing_notes)
+        
+        return {
+            "success": True,
+            "extracted_data": {
+                "enhanced_text": combined_enhanced_text,
+                "metadata": combined_metadata,
+                "quality_score": average_quality,
+                "processing_notes": f"Processed in {len(chunks)} chunks. {combined_notes}"
+            },
+            "chunks_processed": len(chunks),
+            "total_tokens": self.count_tokens(text)
+        }
     
     def extract_structured_data(self, text: str, data_types: List[str], prefer_private_gpt4: bool = True) -> Dict[str, Any]:
         """

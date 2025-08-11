@@ -203,8 +203,8 @@ class DocumentProcessor:
                     os.remove(ocr_temp_pdf)
                 except Exception:
                     pass
-        # Step 3: unstructured.io, skipping Table of Contents
-        if not text.strip():
+        # Step 3: unstructured.io, skipping Table of Contents (only when OCR is enabled)
+        if not text.strip() and self.enable_ocr:
             try:
                 from unstructured.partition.pdf import partition_pdf
                 print("[unstructured] Partitioning PDF...")

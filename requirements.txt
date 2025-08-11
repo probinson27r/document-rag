@@ -22,5 +22,6 @@ pytesseract
 reportlab
 requests
 sentence-transformers
+tiktoken
 unstructured
 unstructured_inference
