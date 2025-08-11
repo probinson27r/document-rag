@@ -308,16 +308,14 @@ jobs:
           
           # Set up environment variables for secrets access fallback
           echo "🔧 Setting up environment variables..."
-          cat > .env << 'ENVEOF'
-# Environment variables for Legal Document RAG System
-# These serve as fallbacks if AWS Secrets Manager is not accessible
-FLASK_ENV=production
-# Note: Add your actual API keys here or use AWS Secrets Manager
-# PRIVATE_GPT4_API_KEY=your-private-gpt4-key
-# ANTHROPIC_API_KEY=your-anthropic-key  
-# OPENAI_API_KEY=your-openai-key
-# SECRET_KEY=your-flask-secret-key
-ENVEOF
+          echo "# Environment variables for Legal Document RAG System" > .env
+          echo "# These serve as fallbacks if AWS Secrets Manager is not accessible" >> .env
+          echo "FLASK_ENV=production" >> .env
+          echo "# Note: Add your actual API keys here or use AWS Secrets Manager" >> .env
+          echo "# PRIVATE_GPT4_API_KEY=your-private-gpt4-key" >> .env
+          echo "# ANTHROPIC_API_KEY=your-anthropic-key" >> .env
+          echo "# OPENAI_API_KEY=your-openai-key" >> .env
+          echo "# SECRET_KEY=your-flask-secret-key" >> .env
           
           # Verify persistent data directories exist
           echo "🔍 Verifying persistent data directories..."
