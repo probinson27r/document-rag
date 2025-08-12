@@ -223,12 +223,27 @@ class LangExtractChunker:
         try:
             # Import LangExtract components
             from langchain_google_genai import GoogleGenerativeAI
-            from langchain.schema import HumanMessage, SystemMessage
+            import os
+            
+            # Load environment variables and get API key
+            try:
+                from dotenv import load_dotenv
+                load_dotenv('.env.local')
+            except ImportError:
+                pass  # dotenv not available
+            
+            api_key = os.getenv('GOOGLE_API_KEY')
+            if not api_key:
+                logger.error("GOOGLE_API_KEY not found in environment variables")
+                logger.error("Make sure GOOGLE_API_KEY is set in .env.local or environment")
+                raise ValueError("Google API key is required for LangExtract API mode")
             
             # Initialize Google Generative AI
             genai = GoogleGenerativeAI(
                 model="gemini-1.5-flash",
-                google_api_key=os.getenv('GOOGLE_API_KEY')
+                google_api_key=api_key,
+                temperature=0.1,  # Low temperature for consistent extraction
+                max_output_tokens=8192  # Increased for larger documents
             )
             
             # Create LangExtract prompt for document structure extraction
@@ -272,23 +287,25 @@ Return the result as a valid JSON object with the structure:
 
 Extract all sections, lists, and key information while preserving the document's semantic structure."""
 
-            # Get response from LangExtract
-            messages = [
-                SystemMessage(content=system_prompt),
-                HumanMessage(content=extraction_prompt)
-            ]
+            # Get response from LangExtract API
+            full_prompt = f"{system_prompt}\n\nDocument to analyze:\n{text}\n\nExtract all sections, lists, and key information while preserving the document's semantic structure."
             
-            response = genai.invoke(messages)
+            logger.info("Calling Google GenAI API for document structure extraction...")
+            response = genai.invoke(full_prompt)
             
             # Parse the response
             try:
+                # Extract content from response (handle different response formats)
+                response_text = response if isinstance(response, str) else str(response)
+                logger.info(f"Received response from Google GenAI: {len(response_text)} characters")
+                
                 # Try to extract JSON from the response
-                json_match = re.search(r'\{.*\}', response.content, re.DOTALL)
+                json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
                 if json_match:
                     result = json.loads(json_match.group())
                 else:
                     # If no JSON found, try to parse the entire response
-                    result = json.loads(response.content)
+                    result = json.loads(response_text)
                 
                 # Convert to LangExtractChunk objects
                 chunks = []

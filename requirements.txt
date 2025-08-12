@@ -7,6 +7,7 @@ flask
 flask-session
 fpdf
 langchain
+langchain-google-genai
 numpy<2.0.0
 ollama
 openai
