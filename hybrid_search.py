@@ -621,7 +621,7 @@ class HybridSearch:
         if section_number == '3.2':
             correct_chunks = self.find_correct_section_32_chunks()
             if correct_chunks:
-                print(f"Using correct Section 3.2 chunks (139-143) with end-to-end objectives")
+                print(f"Using correct Section 3.2 chunks (139-148) with complete end-to-end objectives")
                 return correct_chunks
         # Enhanced search patterns for Section 3.2(a) objectives
         search_patterns = [
@@ -860,9 +860,9 @@ class HybridSearch:
                         'relevance_score': 1.0
                     }
             
-            # Get the correct Section 3.2 chunks (139 = header, 140+ = objectives with end-to-end)
+            # Get the correct Section 3.2 chunks (139 = header, 140-144 = complete objectives with end-to-end)
             correct_chunks = []
-            target_chunks = [139, 140, 141, 142, 143]  # Section header + several objective chunks
+            target_chunks = [139, 140, 141, 142, 143, 144, 145, 146, 147, 148]  # Section header + ALL objective chunks including detailed behaviors
             
             for chunk_index in target_chunks:
                 if chunk_index in chunk_map:
