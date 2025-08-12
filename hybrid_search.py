@@ -19,15 +19,40 @@ class HybridSearch:
             chroma_path: Path to ChromaDB directory
             collection_name: Name of the collection to search
         """
-        # Initialize ChromaDB with same settings as Flask app
-        self.client = chromadb.PersistentClient(
-            path=chroma_path,
-            settings=chromadb.config.Settings(
-                anonymized_telemetry=False,
-                allow_reset=True
+        # Initialize ChromaDB with same settings as Flask app and error handling
+        try:
+            self.client = chromadb.PersistentClient(
+                path=chroma_path,
+                settings=chromadb.config.Settings(
+                    anonymized_telemetry=False,
+                    allow_reset=True
+                )
             )
-        )
-        self.collection = self.client.get_collection(collection_name)
+            self.collection = self.client.get_collection(collection_name)
+        except Exception as chroma_error:
+            # Handle schema corruption
+            if "collections.topic" in str(chroma_error) or "no such column" in str(chroma_error):
+                print(f"ChromaDB schema corruption detected in HybridSearch: {chroma_error}")
+                print("Attempting to use get_or_create_collection as fallback...")
+                
+                try:
+                    self.client = chromadb.PersistentClient(
+                        path=chroma_path,
+                        settings=chromadb.config.Settings(
+                            anonymized_telemetry=False,
+                            allow_reset=True
+                        )
+                    )
+                    self.collection = self.client.get_or_create_collection(
+                        name=collection_name,
+                        metadata={"hnsw:space": "cosine"}
+                    )
+                    print("HybridSearch ChromaDB recovered using get_or_create_collection")
+                except Exception as fallback_error:
+                    print(f"HybridSearch ChromaDB fallback failed: {fallback_error}")
+                    raise fallback_error
+            else:
+                raise chroma_error
         self.logger = logging.getLogger(__name__)
     
     def is_list_query(self, query: str) -> bool:

@@ -208,23 +208,66 @@ def initialize_rag_system():
             logger.info("ChromaDB initialized")
         except Exception as chroma_error:
             logger.error(f"ChromaDB initialization error: {chroma_error}")
-            # Try to reset and reinitialize
-            try:
-                chroma_client = chromadb.PersistentClient(
-                    path="./chroma_db",
-                    settings=Settings(
-                        anonymized_telemetry=False,
-                        allow_reset=True
+            
+            # Check for schema corruption (collections.topic error)
+            if "collections.topic" in str(chroma_error) or "no such column" in str(chroma_error):
+                logger.warning("ChromaDB schema corruption detected - attempting automatic fix")
+                
+                # Backup and reset ChromaDB
+                try:
+                    import shutil
+                    from pathlib import Path
+                    import time
+                    
+                    # Create backup
+                    backup_path = f"./chroma_db_backup_auto_{int(time.time())}"
+                    if Path("./chroma_db").exists():
+                        shutil.copytree("./chroma_db", backup_path)
+                        logger.info(f"Corrupted ChromaDB backed up to {backup_path}")
+                    
+                    # Remove corrupted database
+                    if Path("./chroma_db").exists():
+                        shutil.rmtree("./chroma_db")
+                        logger.info("Corrupted ChromaDB removed")
+                    
+                    # Wait a moment for filesystem cleanup
+                    time.sleep(1)
+                    
+                    # Reinitialize with fresh schema
+                    chroma_client = chromadb.PersistentClient(
+                        path="./chroma_db",
+                        settings=Settings(
+                            anonymized_telemetry=False,
+                            allow_reset=True
+                        )
                     )
-                )
-                collection = chroma_client.get_or_create_collection(
-                    name="documents",
-                    metadata={"hnsw:space": "cosine"}
-                )
-                logger.info("ChromaDB reinitialized successfully")
-            except Exception as retry_error:
-                logger.error(f"ChromaDB reinitialization failed: {retry_error}")
-                return False
+                    collection = chroma_client.get_or_create_collection(
+                        name="documents",
+                        metadata={"hnsw:space": "cosine"}
+                    )
+                    logger.info("ChromaDB automatically reset and reinitialized successfully")
+                    
+                except Exception as reset_error:
+                    logger.error(f"Automatic ChromaDB reset failed: {reset_error}")
+                    return False
+            else:
+                # Try standard reinitialization for other errors
+                try:
+                    chroma_client = chromadb.PersistentClient(
+                        path="./chroma_db",
+                        settings=Settings(
+                            anonymized_telemetry=False,
+                            allow_reset=True
+                        )
+                    )
+                    collection = chroma_client.get_or_create_collection(
+                        name="documents",
+                        metadata={"hnsw:space": "cosine"}
+                    )
+                    logger.info("ChromaDB reinitialized successfully")
+                except Exception as retry_error:
+                    logger.error(f"ChromaDB reinitialization failed: {retry_error}")
+                    return False
         ollama_client = ollama.Client(host='http://localhost:11434')
         logger.info("Ollama client initialized")
         claude_api_key = os.getenv('ANTHROPIC_API_KEY')
