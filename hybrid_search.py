@@ -516,13 +516,19 @@ class HybridSearch:
         elif section_numbers:
             self.logger.info(f"Found section numbers: {section_numbers}")
             
-            # Try exact search first
+            # Use enhanced section search for any section query (generalized approach)
+            self.logger.info(f"Using enhanced section search for {section_numbers[0]}")
+            enhanced_results = self.enhanced_section_search(section_numbers[0], query, n_results)
+            if enhanced_results:
+                return enhanced_results
+            
+            # Fallback to exact search if enhanced search fails
             exact_results = self.exact_text_search(query, section_numbers)
             if exact_results:
                 self.logger.info(f"Found {len(exact_results)} exact matches")
                 return exact_results[:n_results]
             
-            # Fallback to hybrid search
+            # Final fallback to hybrid search
             self.logger.info("No exact matches, trying hybrid search")
             return self.hybrid_search(query, n_results, semantic_weight=0.3, exact_weight=0.7)
         
@@ -617,12 +623,11 @@ class HybridSearch:
         Returns:
             List of related chunks
         """
-        # Special handling for Section 3.2 - prioritize the correct chunks (139-143) with end-to-end objectives
-        if section_number == '3.2':
-            correct_chunks = self.find_correct_section_32_chunks()
-            if correct_chunks:
-                print(f"Using correct Section 3.2 chunks (139-148) with complete end-to-end objectives")
-                return correct_chunks
+        # Generalized handling for any section with nested content
+        nested_chunks = self.find_section_with_nesting(section_number)
+        if nested_chunks:
+            print(f"Using generalized section search for {section_number} - found {len(nested_chunks)} chunks with nested content")
+            return nested_chunks
         # Enhanced search patterns for Section 3.2(a) objectives
         search_patterns = [
             f"Section {section_number}",
@@ -840,15 +845,17 @@ class HybridSearch:
         
         return reconstructed
     
-    def find_correct_section_32_chunks(self) -> List[Dict]:
+    def find_section_with_nesting(self, section_number: str) -> List[Dict]:
         """
-        Find the correct Section 3.2 chunks (chunks 139-143 with end-to-end objectives)
+        Generalized method to find any section with nested content across multiple chunks
         """
         try:
-            # Get all documents to find chunks by index
+            # Get all documents to find chunks by index and content
             all_data = self.collection.get(include=['documents', 'metadatas'])
             
             chunk_map = {}
+            section_header_chunks = []
+            
             for doc_id, doc, metadata in zip(all_data['ids'], all_data['documents'], all_data['metadatas']):
                 chunk_index = metadata.get('chunk_index', -1)
                 if chunk_index >= 0:
@@ -859,24 +866,81 @@ class HybridSearch:
                         'distance': 0.0,
                         'relevance_score': 1.0
                     }
+                    
+                    # Find section headers with flexible matching
+                    content = doc.lower()
+                    section_patterns = [
+                        rf'##\s*{re.escape(section_number)}\s+',  # ## 3.2 Title
+                        rf'section\s+{re.escape(section_number)}\b',  # Section 3.2
+                        rf'clause\s+{re.escape(section_number)}\b',   # Clause 3.2
+                    ]
+                    
+                    for pattern in section_patterns:
+                        if re.search(pattern, content, re.IGNORECASE):
+                            section_header_chunks.append(chunk_index)
+                            break
             
-            # Get the correct Section 3.2 chunks (139 = header, 140-144 = complete objectives with end-to-end)
-            correct_chunks = []
-            target_chunks = [139, 140, 141, 142, 143, 144, 145, 146, 147, 148]  # Section header + ALL objective chunks including detailed behaviors
+            if not section_header_chunks:
+                return []
             
-            for chunk_index in target_chunks:
-                if chunk_index in chunk_map:
-                    chunk_data = chunk_map[chunk_index]
-                    # Prioritize chunks with end-to-end content
-                    if 'end-to-end' in chunk_data['content'].lower():
-                        chunk_data['relevance_score'] = 1.0  # Highest priority
-                        print(f"Found end-to-end objectives in chunk {chunk_index}")
-                    correct_chunks.append(chunk_data)
+            # For each section header, find the range of chunks with nested content
+            all_section_chunks = []
             
-            return correct_chunks
+            for header_chunk in section_header_chunks:
+                # Define search range (header + following chunks until next major section)
+                search_range = range(header_chunk, min(header_chunk + 25, len(chunk_map)))
+                
+                section_chunks = []
+                found_nesting = False
+                
+                for chunk_index in search_range:
+                    if chunk_index in chunk_map:
+                        chunk_data = chunk_map[chunk_index]
+                        content = chunk_data['content']
+                        
+                        # Check if this chunk has nested content patterns
+                        has_letters = bool(re.search(r'\([a-z]\)', content, re.IGNORECASE))
+                        has_romans = bool(re.search(r'\([ivx]+\)', content, re.IGNORECASE))
+                        has_numbers = bool(re.search(r'^\s*\d+\)', content, re.MULTILINE))
+                        has_capitals = bool(re.search(r'\([A-Z]\)', content))
+                        
+                        # Stop if we hit another major section (unless it's a subsection)
+                        other_section = re.search(rf'##\s*(\d+(?:\.\d+)*)\s+', content)
+                        if other_section and chunk_index > header_chunk:
+                            other_section_num = other_section.group(1)
+                            if not other_section_num.startswith(section_number):
+                                # Found a different major section, stop here
+                                break
+                        
+                        # Include chunk if it has nested content or is the header
+                        if (chunk_index == header_chunk or 
+                            has_letters or has_romans or has_numbers or has_capitals):
+                            
+                            section_chunks.append(chunk_data)
+                            
+                            if has_letters or has_romans or has_numbers or has_capitals:
+                                found_nesting = True
+                                # Boost relevance for chunks with nested content
+                                nesting_score = sum([has_letters, has_romans, has_numbers, has_capitals])
+                                chunk_data['relevance_score'] = 0.8 + (0.05 * nesting_score)
+                                
+                                # Extra boost for chunks with multiple roman numerals (like objectives)
+                                roman_count = len(re.findall(r'\([ivx]+\)', content, re.IGNORECASE))
+                                if roman_count > 1:
+                                    chunk_data['relevance_score'] = min(1.0, chunk_data['relevance_score'] + 0.1)
+                
+                if section_chunks and found_nesting:
+                    all_section_chunks.extend(section_chunks)
+                    chunk_range = f"{header_chunk}-{header_chunk + len(section_chunks)-1}"
+                    print(f"Found section {section_number} with nesting spanning chunks {chunk_range}")
+            
+            # Sort by relevance score
+            all_section_chunks.sort(key=lambda x: x['relevance_score'], reverse=True)
+            
+            return all_section_chunks
             
         except Exception as e:
-            print(f"Error finding correct Section 3.2 chunks: {e}")
+            print(f"Error finding section {section_number} with nesting: {e}")
             return []
 
 # Example usage and testing
