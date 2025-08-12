@@ -18,14 +18,17 @@ fi
 # Check if virtual environment is activated
 if [[ "$VIRTUAL_ENV" == "" ]]; then
     echo "⚠️  Virtual environment not detected. Activating..."
-    if [ -d ".venv" ]; then
-        source .venv/bin/activate
-    elif [ -d "venv" ]; then
+    # Prefer the fresh 'venv' directory to avoid schema corruption issues
+    if [ -d "venv" ]; then
+        echo "   Using fresh 'venv' directory..."
         source venv/bin/activate
+    elif [ -d ".venv" ]; then
+        echo "   Using '.venv' directory..."
+        source .venv/bin/activate
     else
         echo "❌ No virtual environment found. Please create one first:"
-        echo "   python3 -m venv .venv"
-        echo "   source .venv/bin/activate"
+        echo "   python3 -m venv venv"
+        echo "   source venv/bin/activate"
         echo "   pip install -r requirements.txt"
         exit 1
     fi
