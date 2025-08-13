@@ -560,7 +560,7 @@ def ingest_legal_document(file_path: str, processing_id: str = None) -> dict:
             'error': str(e)
         }
 
-def ingest_document_with_improved_chunking(file_path: str, processing_id: str = None) -> dict:
+def ingest_document_with_improved_chunking(file_path: str, processing_id: str = None, passed_config: dict = None) -> dict:
     """Ingest a document using the improved chunking strategy that keeps section headers with content"""
     try:
         logger.info(f"Processing document with improved chunking: {file_path}")
@@ -577,32 +577,60 @@ def ingest_document_with_improved_chunking(file_path: str, processing_id: str = 
         from document_rag import DocumentRAG
         
         # Get chunking method and OCR configuration
-        try:
-            extraction_config = session.get('extraction_config', {})
-            chunking_method = extraction_config.get('chunking', {}).get('method', 'semantic')
-            enable_ocr = extraction_config.get('ocr', {}).get('enabled', False)
-            extraction_method = extraction_config.get('extraction_method', 'auto')
-            logger.info(f"[CONFIG] Using chunking method: {chunking_method} (from session config)")
-            logger.info(f"[CONFIG] Using extraction method: {extraction_method}")
-            logger.info(f"[CONFIG] Extraction config: {extraction_config}")
-        except RuntimeError:
-            # No request context, use default
-            chunking_method = 'semantic'
-            enable_ocr = False
-            extraction_method = 'auto'
-            logger.info(f"[CONFIG] No session context, using defaults: chunking={chunking_method}, extraction={extraction_method}")
+        if passed_config:
+            # Use configuration passed from upload function (background thread safe)
+            chunking_method = passed_config.get('chunking_method', 'semantic')
+            enable_ocr = passed_config.get('enable_ocr', False)
+            extraction_method = passed_config.get('extraction_method', 'auto')
+            logger.info(f"[CONFIG] Using passed configuration (background thread):")
+            logger.info(f"  chunking_method: '{chunking_method}'")
+            logger.info(f"  extraction_method: '{extraction_method}'")
+            logger.info(f"  enable_ocr: {enable_ocr}")
+        else:
+            # Try to get from session (main thread)
+            try:
+                extraction_config = session.get('extraction_config', {})
+                logger.info(f"[CONFIG] Raw session extraction_config: {extraction_config}")
+                
+                chunking_method = extraction_config.get('chunking', {}).get('method', 'semantic')
+                enable_ocr = extraction_config.get('ocr', {}).get('enabled', False)
+                extraction_method = extraction_config.get('extraction_method', 'auto')
+                
+                logger.info(f"[CONFIG] Parsed values from session:")
+                logger.info(f"  chunking_method: '{chunking_method}' (from session.extraction_config.chunking.method)")
+                logger.info(f"  extraction_method: '{extraction_method}' (from session.extraction_config.extraction_method)")
+                logger.info(f"  enable_ocr: {enable_ocr} (from session.extraction_config.ocr.enabled)")
+            except RuntimeError:
+                # No request context, use default
+                chunking_method = 'semantic'
+                enable_ocr = False
+                extraction_method = 'auto'
+                logger.info(f"[CONFIG] No session context, using defaults: chunking={chunking_method}, extraction={extraction_method}")
         
         # Determine GPT-4 usage based on chunking method and extraction method
-        # When using LangExtract, disable GPT-4 extraction to use Google GenAI instead
-        use_gpt4_enhancement = (
-            extraction_method != 'traditional' and 
-            chunking_method != 'langextract'  # Disable GPT-4 when using LangExtract
-        )
-        use_gpt4_chunking = (
-            extraction_method != 'traditional' and 
-            chunking_method == 'gpt4'  # Only enable GPT-4 chunking when explicitly selected
-        )
+        # When using LangExtract, disable ALL GPT-4 features to use Google GenAI instead
+        if chunking_method == 'langextract':
+            # LangExtract uses Google GenAI - disable all GPT-4 features
+            use_gpt4_enhancement = False
+            use_gpt4_chunking = False
+            logger.info(f"[CONFIG] LangExtract selected - disabling ALL GPT-4 features")
+        else:
+            # Normal logic for other chunking methods
+            use_gpt4_enhancement = (
+                extraction_method != 'traditional' and 
+                chunking_method != 'langextract'  # Disable GPT-4 when using LangExtract
+            )
+            use_gpt4_chunking = (
+                extraction_method != 'traditional' and 
+                chunking_method == 'gpt4'  # Only enable GPT-4 chunking when explicitly selected
+            )
         
+        logger.info(f"[CONFIG] Logic check:")
+        logger.info(f"  extraction_method: '{extraction_method}'")
+        logger.info(f"  chunking_method: '{chunking_method}'")
+        logger.info(f"  extraction_method != 'traditional': {extraction_method != 'traditional'}")
+        logger.info(f"  chunking_method != 'langextract': {chunking_method != 'langextract'}")
+        logger.info(f"  chunking_method == 'gpt4': {chunking_method == 'gpt4'}")
         logger.info(f"[CONFIG] GPT-4 enhancement: {use_gpt4_enhancement}")
         logger.info(f"[CONFIG] GPT-4 chunking: {use_gpt4_chunking}")
         
@@ -854,8 +882,24 @@ def upload_file():
             'error': None
         }
         
+        # Capture session configuration BEFORE starting background thread
+        extraction_config = session.get('extraction_config', {})
+        chunking_method = extraction_config.get('chunking', {}).get('method', 'semantic')
+        enable_ocr = extraction_config.get('ocr', {}).get('enabled', False)
+        extraction_method = extraction_config.get('extraction_method', 'auto')
+        use_improved_chunking = extraction_config.get('chunking', {}).get('use_improved_chunking', True)
+        
+        logger.info(f"[UPLOAD] Captured session config before background thread:")
+        logger.info(f"  chunking_method: '{chunking_method}'")
+        logger.info(f"  extraction_method: '{extraction_method}'")
+        logger.info(f"  enable_ocr: {enable_ocr}")
+        logger.info(f"  use_improved_chunking: {use_improved_chunking}")
+        
         # Start async processing
         def process_document_async():
+            # Capture the config variables in the function scope
+            nonlocal chunking_method, extraction_method, enable_ocr, use_improved_chunking
+            
             try:
                 processing_status[processing_id]['progress'] = 10
                 processing_status[processing_id]['message'] = 'Document saved, starting processing...'
@@ -866,19 +910,19 @@ def upload_file():
                 if file_extension == '.pdf':
                     processing_status[processing_id]['progress'] = 20
                     
-                    # Check chunking configuration
-                    try:
-                        extraction_config = session.get('extraction_config', {})
-                        chunking_config = extraction_config.get('chunking', {})
-                        use_improved_chunking = chunking_config.get('use_improved_chunking', True)
-                    except RuntimeError:
-                        # No request context, use default
-                        use_improved_chunking = True
-                    
                     if use_improved_chunking:
                         processing_status[processing_id]['message'] = 'Processing PDF with improved chunking strategy...'
                         # Use improved chunking strategy for PDFs (better section retention)
-                        result = ingest_document_with_improved_chunking(filepath, processing_id)
+                        # Pass the captured config to the function
+                        result = ingest_document_with_improved_chunking(
+                            filepath, 
+                            processing_id, 
+                            passed_config={
+                                'chunking_method': chunking_method,
+                                'extraction_method': extraction_method,
+                                'enable_ocr': enable_ocr
+                            }
+                        )
                     else:
                         processing_status[processing_id]['message'] = 'Processing PDF with traditional chunking...'
                         # Use traditional legal document processing

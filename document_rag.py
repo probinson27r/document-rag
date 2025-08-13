@@ -59,6 +59,16 @@ class DocumentProcessor:
         self.use_gpt4_chunking = use_gpt4_chunking and GPT4_CHUNKING_AVAILABLE
         self.enable_ocr = enable_ocr
         
+        # Debug logging
+        print(f"[DEBUG] DocumentProcessor initialized:")
+        print(f"  use_gpt4_enhancement (requested): {use_gpt4_enhancement}")
+        print(f"  GPT4_EXTRACTION_AVAILABLE: {GPT4_EXTRACTION_AVAILABLE}")
+        print(f"  use_gpt4_enhancement (final): {self.use_gpt4_enhancement}")
+        print(f"  use_gpt4_chunking (requested): {use_gpt4_chunking}")
+        print(f"  GPT4_CHUNKING_AVAILABLE: {GPT4_CHUNKING_AVAILABLE}")
+        print(f"  use_gpt4_chunking (final): {self.use_gpt4_chunking}")
+        print(f"  enable_ocr: {enable_ocr}")
+        
         # Initialize GPT-4 extractor if available
         self.gpt4_extractor = None
         if self.use_gpt4_enhancement:
@@ -73,6 +83,8 @@ class DocumentProcessor:
             except Exception as e:
                 print(f"[GPT-4] Failed to initialize GPT-4 extractor: {e}")
                 self.use_gpt4_enhancement = False
+        else:
+            print("[GPT-4] GPT-4 extraction disabled (controlled by configuration)")
         
         # Initialize GPT-4 chunker if available
         self.gpt4_chunker = None

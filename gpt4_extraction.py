@@ -327,53 +327,75 @@ class GPT4Extractor:
             logger.error(f"Claude extraction error: {e}")
             return {"error": str(e), "extracted_data": {}}
     
-    def _extract_with_private_gpt4(self, text: str, prompt: str, model: str, max_tokens: int) -> Dict[str, Any]:
-        """Extract using Private GPT-4"""
-        try:
-            headers = {
-                'Content-Type': 'application/json',
-                'api-key': self.private_gpt4_key,
-                'Accept': 'application/json'
-            }
-            
-            data = {
-                "messages": [
-                    {"role": "system", "content": "You are an expert document analyzer and data extractor. Extract the requested information accurately and return it in JSON format."},
-                    {"role": "user", "content": f"{prompt}\n\nDocument text:\n{text}"}
-                ],
-                "max_tokens": max_tokens,
-                "temperature": 0.1
-            }
-            
-            # Add timeout to prevent hanging
-            response = requests.post(self.private_gpt4_url, headers=headers, json=data, timeout=15)
-            response.raise_for_status()
-            
-            result = response.json()
-            content = result['choices'][0]['message']['content']
-            
+    def _extract_with_private_gpt4(self, text: str, prompt: str, model: str, max_tokens: int, max_retries: int = 2) -> Dict[str, Any]:
+        """Extract using Private GPT-4 with retry logic"""
+        headers = {
+            'Content-Type': 'application/json',
+            'api-key': self.private_gpt4_key,
+            'Accept': 'application/json'
+        }
+        
+        data = {
+            "messages": [
+                {"role": "system", "content": "You are an expert document analyzer and data extractor. Extract the requested information accurately and return it in JSON format."},
+                {"role": "user", "content": f"{prompt}\n\nDocument text:\n{text}"}
+            ],
+            "max_tokens": max_tokens,
+            "temperature": 0.1
+        }
+        
+        for attempt in range(max_retries + 1):
             try:
-                # Clean the response to handle markdown formatting
-                cleaned_content = self._clean_json_response(content)
-                # Try to parse as JSON
-                extracted_data = json.loads(cleaned_content)
-                return {"success": True, "extracted_data": extracted_data, "raw_response": content}
-            except json.JSONDecodeError:
-                # Return as text if not JSON
-                return {"success": True, "extracted_data": {"text": content}, "raw_response": content}
+                if attempt > 0:
+                    logger.info(f"Private GPT-4 retry attempt {attempt}/{max_retries}")
+                    # Wait before retry (exponential backoff)
+                    wait_time = 5 * (2 ** (attempt - 1))
+                    time.sleep(wait_time)
                 
-        except requests.exceptions.Timeout:
-            logger.error("Private GPT-4 extraction timeout after 30 seconds")
-            return {"error": "Request timeout", "extracted_data": {}}
-        except requests.exceptions.ConnectionError as e:
-            logger.error(f"Private GPT-4 connection error: {e}")
-            return {"error": f"Connection failed: {str(e)}", "extracted_data": {}}
-        except Exception as e:
-            logger.error(f"Private GPT-4 extraction error: {e}")
-            if hasattr(e, 'response') and e.response is not None:
-                logger.error(f"Response status: {e.response.status_code}")
-                logger.error(f"Response content: {e.response.text}")
-            return {"error": str(e), "extracted_data": {}}
+                # Add timeout to prevent hanging (increased for large document processing)
+                response = requests.post(self.private_gpt4_url, headers=headers, json=data, timeout=120)
+                response.raise_for_status()
+                
+                result = response.json()
+                content = result['choices'][0]['message']['content']
+                
+                try:
+                    # Clean the response to handle markdown formatting
+                    cleaned_content = self._clean_json_response(content)
+                    # Try to parse as JSON
+                    extracted_data = json.loads(cleaned_content)
+                    return {"success": True, "extracted_data": extracted_data, "raw_response": content}
+                except json.JSONDecodeError:
+                    # Return as text if not JSON
+                    return {"success": True, "extracted_data": {"text": content}, "raw_response": content}
+                    
+            except requests.exceptions.Timeout:
+                if attempt < max_retries:
+                    logger.warning(f"Private GPT-4 extraction timeout after 120 seconds (attempt {attempt + 1}/{max_retries + 1})")
+                    continue  # Retry
+                else:
+                    logger.error(f"Private GPT-4 extraction timeout after 120 seconds (final attempt)")
+                    return {"error": "Request timeout after retries", "extracted_data": {}}
+            except requests.exceptions.ConnectionError as e:
+                if attempt < max_retries:
+                    logger.warning(f"Private GPT-4 connection error: {e} (attempt {attempt + 1}/{max_retries + 1})")
+                    continue  # Retry
+                else:
+                    logger.error(f"Private GPT-4 connection error: {e} (final attempt)")
+                    return {"error": f"Connection failed after retries: {str(e)}", "extracted_data": {}}
+            except Exception as e:
+                if attempt < max_retries:
+                    logger.warning(f"Private GPT-4 extraction error: {e} (attempt {attempt + 1}/{max_retries + 1})")
+                    continue  # Retry
+                else:
+                    logger.error(f"Private GPT-4 extraction error: {e} (final attempt)")
+                    if hasattr(e, 'response') and e.response is not None:
+                        logger.error(f"Response status: {e.response.status_code}")
+                        logger.error(f"Response content: {e.response.text}")
+                    return {"error": str(e), "extracted_data": {}}
+        
+        # Should not reach here
+        return {"error": "Unexpected end of retry loop", "extracted_data": {}}
     
     def _clean_json_response(self, response: str) -> str:
         """Clean JSON response to handle markdown formatting"""

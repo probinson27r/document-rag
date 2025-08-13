@@ -153,6 +153,9 @@
             <div style="font-size: 11px; color: #6b7280; margin-top: 4px;">
                 Semantic: Preserves document sections and lists | LangExtract: Google's intelligent structure extraction | GPT-4: AI-powered chunking
             </div>
+            <div id="langextractNotice" style="font-size: 11px; color: #059669; margin-top: 4px; display: none;">
+                ℹ️ LangExtract automatically uses Google GenAI (not GPT-4) for optimal document structure extraction
+            </div>
         </div>
         
         <div class="model-section" id="gpt4FeaturesSection">
@@ -326,11 +329,21 @@
     
     async function saveExtractionConfig() {
         try {
+            const chunkingMethod = document.getElementById('chunkingMethodSelect').value;
+            let extractionMethod = document.getElementById('extractionMethodSelect').value;
+            
+            // Auto-adjust extraction method for LangExtract
+            if (chunkingMethod === 'langextract') {
+                extractionMethod = 'auto';  // Use 'auto' instead of 'traditional' for LangExtract
+                document.getElementById('extractionMethodSelect').value = 'auto';
+                console.log('LangExtract selected: automatically set extraction method to auto');
+            }
+            
             const config = {
-                extraction_method: document.getElementById('extractionMethodSelect').value,
+                extraction_method: extractionMethod,
                 gpt4_model: document.getElementById('gpt4ModelSelect').value,
                 chunking: {
-                    method: document.getElementById('chunkingMethodSelect').value
+                    method: chunkingMethod
                 },
                 features: {
                     text_enhancement: document.getElementById('enableTextEnhancement').checked,
@@ -372,9 +385,12 @@
     // Update extraction method visibility based on selection
     function updateExtractionUI() {
         const extractionMethod = document.getElementById('extractionMethodSelect').value;
+        const chunkingMethod = document.getElementById('chunkingMethodSelect').value;
         const gpt4Features = document.getElementById('gpt4FeaturesSection');
         const gpt4Model = document.getElementById('gpt4ModelSection');
         const statusSection = document.getElementById('extractionStatusSection');
+        const langextractNotice = document.getElementById('langextractNotice');
+        
         if (gpt4Features && gpt4Model && statusSection) {
             if (extractionMethod === 'gpt4_enhanced') {
                 gpt4Features.style.display = 'block';
@@ -385,6 +401,11 @@
                 gpt4Model.style.display = 'none';
                 statusSection.style.display = 'none';
             }
+        }
+        
+        // Show/hide LangExtract notice
+        if (langextractNotice) {
+            langextractNotice.style.display = chunkingMethod === 'langextract' ? 'block' : 'none';
         }
     }
     
@@ -716,7 +737,10 @@
     document.getElementById('gpt4ModelSelect').addEventListener('change', saveExtractionConfig);
     
     // Chunking method dropdown
-    document.getElementById('chunkingMethodSelect').addEventListener('change', saveExtractionConfig);
+    document.getElementById('chunkingMethodSelect').addEventListener('change', function() {
+        updateExtractionUI();  // Update UI to show/hide LangExtract notice
+        saveExtractionConfig();
+    });
     
     // GPT-4 feature checkboxes
     document.getElementById('enableTextEnhancement').addEventListener('change', saveExtractionConfig);
