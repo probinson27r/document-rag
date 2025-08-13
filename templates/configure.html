@@ -135,10 +135,11 @@
             <select class="model-select" id="extractionMethodSelect">
                 <option value="auto">Auto (Best Available)</option>
                 <option value="gpt4_enhanced">GPT-4 Enhanced</option>
+                <option value="langextract">LangExtract (Google AI)</option>
                 <option value="traditional">Traditional Only</option>
             </select>
             <div style="font-size: 11px; color: #6b7280; margin-top: 4px;">
-                GPT-4 Enhanced: Uses AI to improve text extraction and extract structured data
+                GPT-4 Enhanced: Uses AI to improve text extraction | LangExtract: Google's intelligent extraction | Traditional: Basic extraction
             </div>
         </div>
         
@@ -187,6 +188,19 @@
                 <option value="gpt-4">GPT-4 (High Quality)</option>
                 <option value="claude-3-5-sonnet-20241022">Claude 3.5 Sonnet</option>
             </select>
+        </div>
+        
+        <div class="model-section" id="gpt4ProviderSection">
+            <label class="model-label">GPT-4 Provider Preference</label>
+            <div style="background: #f9fafb; border-radius: 6px; padding: 12px;">
+                <label style="display: flex; align-items: center; font-size: 12px;">
+                    <input type="checkbox" id="preferPrivateGpt4" checked style="margin-right: 8px;">
+                    Prefer Private GPT-4 (when available)
+                </label>
+                <div style="font-size: 11px; color: #6b7280; margin-top: 4px;">
+                    When enabled, uses Private GPT-4 for enhanced security. Falls back to OpenAI GPT-4 if unavailable.
+                </div>
+            </div>
         </div>
         
         <div class="model-section" id="ocrConfigSection">
@@ -312,6 +326,12 @@
             const chunkingMethodSelect = document.getElementById('chunkingMethodSelect');
             chunkingMethodSelect.value = data.chunking?.method || 'semantic';
             
+            // Set prefer private GPT-4 setting
+            const preferPrivateGpt4 = document.getElementById('preferPrivateGpt4');
+            if (preferPrivateGpt4) {
+                preferPrivateGpt4.checked = data.chunking?.prefer_private_gpt4 !== false;
+            }
+            
             // Set feature checkboxes
             document.getElementById('enableTextEnhancement').checked = data.features?.text_enhancement !== false;
             document.getElementById('enableStructuredData').checked = data.features?.structured_data !== false;
@@ -332,29 +352,28 @@
             const chunkingMethod = document.getElementById('chunkingMethodSelect').value;
             let extractionMethod = document.getElementById('extractionMethodSelect').value;
             
-            // Auto-adjust extraction method for LangExtract
-            if (chunkingMethod === 'langextract') {
-                extractionMethod = 'auto';  // Use 'auto' instead of 'traditional' for LangExtract
-                document.getElementById('extractionMethodSelect').value = 'auto';
-                console.log('LangExtract selected: automatically set extraction method to auto');
-            }
+            // LangExtract can now work with any extraction method - no auto-adjustment needed
             
             const config = {
                 extraction_method: extractionMethod,
-                gpt4_model: document.getElementById('gpt4ModelSelect').value,
+                gpt4_model: document.getElementById('gpt4ModelSelect')?.value || 'gpt-4o',
                 chunking: {
-                    method: chunkingMethod
+                    method: chunkingMethod,
+                    prefer_private_gpt4: document.getElementById('preferPrivateGpt4')?.checked !== false
                 },
                 features: {
-                    text_enhancement: document.getElementById('enableTextEnhancement').checked,
-                    structured_data: document.getElementById('enableStructuredData').checked,
-                    contract_analysis: document.getElementById('enableContractAnalysis').checked,
-                    document_summary: document.getElementById('enableDocumentSummary').checked
+                    text_enhancement: document.getElementById('enableTextEnhancement')?.checked !== false,
+                    structured_data: document.getElementById('enableStructuredData')?.checked !== false,
+                    contract_analysis: document.getElementById('enableContractAnalysis')?.checked !== false,
+                    document_summary: document.getElementById('enableDocumentSummary')?.checked === true
                 },
                 ocr: {
-                    enabled: document.getElementById('enableOcr').checked
+                    enabled: document.getElementById('enableOcr')?.checked === true
                 }
             };
+            
+            // Ensure chunking method is preserved for LangExtract extraction
+            console.log('Saving config:', config);
 
             // Save chat (temperature) config in parallel
             const temp = parseFloat(document.getElementById('temperatureInput').value || '0.7');
@@ -747,6 +766,12 @@
     document.getElementById('enableStructuredData').addEventListener('change', saveExtractionConfig);
     document.getElementById('enableContractAnalysis').addEventListener('change', saveExtractionConfig);
     document.getElementById('enableDocumentSummary').addEventListener('change', saveExtractionConfig);
+    
+    // GPT-4 provider preference
+    const preferPrivateGpt4 = document.getElementById('preferPrivateGpt4');
+    if (preferPrivateGpt4) {
+        preferPrivateGpt4.addEventListener('change', saveExtractionConfig);
+    }
     
     // OCR configuration
     document.getElementById('enableOcr').addEventListener('change', saveExtractionConfig);

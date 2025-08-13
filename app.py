@@ -54,6 +54,10 @@ try:
 except ImportError:
     GPT4_EXTRACTION_AVAILABLE = False
 
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 # Import AWS Secrets Manager utilities
 try:
     from aws_secrets import get_private_gpt4_api_key, get_anthropic_api_key, get_openai_api_key, get_secret_key
@@ -61,10 +65,6 @@ try:
 except ImportError:
     AWS_SECRETS_AVAILABLE = False
     logger.warning("AWS Secrets Manager utilities not available, falling back to environment variables")
-
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = 'uploads'
@@ -409,6 +409,80 @@ def ingest_legal_document(file_path: str, processing_id: str = None) -> dict:
                     logger.warning(f"GPT-4 enhancement failed, using traditional processing: {e}")
                     result['extraction_method'] = 'pymupdf_enhanced_fallback'
                     update_progress(80, "GPT-4 enhancement failed, using fallback processing...")
+        elif extraction_method == 'langextract':
+            # Use LangExtract (Google GenAI) enhanced processing
+            update_progress(40, "Processing document with NeMo Retriever...")
+            result = process_legal_pdf_nemo(file_path)
+            update_progress(60, "NeMo processing completed, applying LangExtract enhancements...")
+            
+            # Apply LangExtract enhancements if available
+            try:
+                from langextract_chunking import LangExtractChunker
+                extractor = LangExtractChunker(
+                    max_chunk_size=2000,
+                    min_chunk_size=200,
+                    preserve_lists=True,
+                    preserve_sections=True,
+                    use_langextract_api=True
+                )
+                
+                # Check if LangExtract is available
+                if extractor.langextract_available:
+                    update_progress(70, "Enhancing text extraction with Google GenAI...")
+                    
+                    # Enhance text extraction for all chunks
+                    enhanced_chunks = []
+                    total_chunks = len(result['chunks'])
+                    
+                    for i, chunk in enumerate(result['chunks']):
+                        if i % 5 == 0:  # Update progress every 5 chunks
+                            progress = 70 + int(20 * i / total_chunks)
+                            update_progress(progress, f"Processing chunk {i+1}/{total_chunks} with LangExtract...")
+                        
+                        try:
+                            # Enhance text using LangExtract
+                            file_ext = os.path.splitext(file_path)[1].lower() if 'file_path' in locals() else '.pdf'
+                            enhancement_result = extractor.enhance_text_extraction(
+                                chunk.get('content', ''), 
+                                file_ext
+                            )
+                            
+                            # Extract structured data using LangExtract
+                            structured_data = extractor.extract_structured_data(
+                                enhancement_result['enhanced_text'],
+                                extraction_config['features'].keys() if 'extraction_config' in locals() else ['dates', 'names', 'amounts', 'key_terms']
+                            )
+                            
+                            # Create enhanced chunk
+                            enhanced_chunk = chunk.copy()
+                            enhanced_chunk.update({
+                                'content': enhancement_result['enhanced_text'],
+                                'enhanced_text': enhancement_result['enhanced_text'],
+                                'langextract_enhancement': enhancement_result,
+                                'structured_data': structured_data,
+                                'quality_score': enhancement_result['quality_score'],
+                                'extraction_method': 'langextract_enhanced'
+                            })
+                            enhanced_chunks.append(enhanced_chunk)
+                            
+                        except Exception as chunk_error:
+                            logger.warning(f"LangExtract enhancement failed for chunk {i+1}: {chunk_error}")
+                            # Keep original chunk if enhancement fails
+                            chunk['extraction_method'] = 'langextract_fallback'
+                            enhanced_chunks.append(chunk)
+                    
+                    result['chunks'] = enhanced_chunks
+                    result['extraction_method'] = 'pymupdf_enhanced_with_langextract'
+                    update_progress(90, "LangExtract enhancements completed, preparing chunks...")
+                else:
+                    logger.warning("LangExtract API not available, using traditional processing")
+                    result['extraction_method'] = 'pymupdf_enhanced_langextract_fallback'
+                    update_progress(80, "LangExtract not available, using traditional processing...")
+                    
+            except Exception as e:
+                logger.warning(f"LangExtract enhancement failed, using traditional processing: {e}")
+                result['extraction_method'] = 'pymupdf_enhanced_langextract_fallback'
+                update_progress(80, "LangExtract enhancement failed, using fallback processing...")
         else:  # auto
             # Auto-detect: use GPT-4 if available, otherwise traditional
             update_progress(40, "Processing document with NeMo Retriever...")
@@ -565,6 +639,19 @@ def ingest_document_with_improved_chunking(file_path: str, processing_id: str = 
     try:
         logger.info(f"Processing document with improved chunking: {file_path}")
         
+        # Debug logging: Log the start of processing with configuration
+        try:
+            from debug_json_logger import debug_logger
+            debug_data = {
+                "file_path": file_path,
+                "processing_id": processing_id,
+                "passed_config": passed_config,
+                "stage": "processing_start"
+            }
+            debug_logger.log_document_processing("processing_start", debug_data, passed_config)
+        except Exception as e:
+            print(f"[DEBUG] Failed to log processing start: {e}")
+        
         # Update progress if processing_id provided
         def update_progress(progress, message):
             if processing_id and processing_id in processing_status:
@@ -582,10 +669,12 @@ def ingest_document_with_improved_chunking(file_path: str, processing_id: str = 
             chunking_method = passed_config.get('chunking_method', 'semantic')
             enable_ocr = passed_config.get('enable_ocr', False)
             extraction_method = passed_config.get('extraction_method', 'auto')
+            prefer_private_gpt4 = passed_config.get('prefer_private_gpt4', True)
             logger.info(f"[CONFIG] Using passed configuration (background thread):")
             logger.info(f"  chunking_method: '{chunking_method}'")
             logger.info(f"  extraction_method: '{extraction_method}'")
             logger.info(f"  enable_ocr: {enable_ocr}")
+            logger.info(f"  prefer_private_gpt4: {prefer_private_gpt4}")
         else:
             # Try to get from session (main thread)
             try:
@@ -595,44 +684,62 @@ def ingest_document_with_improved_chunking(file_path: str, processing_id: str = 
                 chunking_method = extraction_config.get('chunking', {}).get('method', 'semantic')
                 enable_ocr = extraction_config.get('ocr', {}).get('enabled', False)
                 extraction_method = extraction_config.get('extraction_method', 'auto')
+                prefer_private_gpt4 = extraction_config.get('chunking', {}).get('prefer_private_gpt4', True)
                 
                 logger.info(f"[CONFIG] Parsed values from session:")
                 logger.info(f"  chunking_method: '{chunking_method}' (from session.extraction_config.chunking.method)")
                 logger.info(f"  extraction_method: '{extraction_method}' (from session.extraction_config.extraction_method)")
                 logger.info(f"  enable_ocr: {enable_ocr} (from session.extraction_config.ocr.enabled)")
+                logger.info(f"  prefer_private_gpt4: {prefer_private_gpt4} (from session.extraction_config.chunking.prefer_private_gpt4)")
             except RuntimeError:
                 # No request context, use default
                 chunking_method = 'semantic'
                 enable_ocr = False
                 extraction_method = 'auto'
-                logger.info(f"[CONFIG] No session context, using defaults: chunking={chunking_method}, extraction={extraction_method}")
+                prefer_private_gpt4 = True
+                logger.info(f"[CONFIG] No session context, using defaults: chunking={chunking_method}, extraction={extraction_method}, prefer_private_gpt4={prefer_private_gpt4}")
         
-        # Determine GPT-4 usage based on chunking method and extraction method
-        # When using LangExtract, disable ALL GPT-4 features to use Google GenAI instead
-        if chunking_method == 'langextract':
-            # LangExtract uses Google GenAI - disable all GPT-4 features
+        # Determine GPT-4 and LangExtract usage based on chunking method and extraction method
+        # When using LangExtract extraction, disable GPT-4 features to use Google GenAI instead
+        if extraction_method == 'langextract':
+            # LangExtract extraction uses Google GenAI - disable GPT-4 features
             use_gpt4_enhancement = False
             use_gpt4_chunking = False
-            logger.info(f"[CONFIG] LangExtract selected - disabling ALL GPT-4 features")
+            use_langextract_enhancement = True
+            logger.info(f"[CONFIG] LangExtract extraction selected - using Google GenAI for text enhancement")
+        elif chunking_method == 'langextract':
+            # LangExtract chunking uses Google GenAI - disable GPT-4 features for chunking but allow extraction enhancement
+            use_gpt4_enhancement = (extraction_method != 'traditional')  # Allow GPT-4 extraction with LangExtract chunking
+            use_gpt4_chunking = False
+            use_langextract_enhancement = False
+            logger.info(f"[CONFIG] LangExtract chunking selected - using Google GenAI for chunking only")
         else:
-            # Normal logic for other chunking methods
+            # GPT-4 Enhancement Logic:
+            # - Enabled for 'auto' and 'gpt4_enhanced' extraction methods
+            # - Disabled for 'traditional' and 'langextract' extraction methods
             use_gpt4_enhancement = (
                 extraction_method != 'traditional' and 
-                chunking_method != 'langextract'  # Disable GPT-4 when using LangExtract
+                extraction_method != 'langextract'
             )
+            
+            # GPT-4 Chunking Logic:
+            # - Only enabled when chunking method is explicitly set to 'gpt4'
+            # - Disabled for 'semantic', 'langextract', and 'traditional' chunking methods
             use_gpt4_chunking = (
                 extraction_method != 'traditional' and 
+                extraction_method != 'langextract' and
                 chunking_method == 'gpt4'  # Only enable GPT-4 chunking when explicitly selected
             )
+            
+            use_langextract_enhancement = False
         
-        logger.info(f"[CONFIG] Logic check:")
-        logger.info(f"  extraction_method: '{extraction_method}'")
-        logger.info(f"  chunking_method: '{chunking_method}'")
-        logger.info(f"  extraction_method != 'traditional': {extraction_method != 'traditional'}")
-        logger.info(f"  chunking_method != 'langextract': {chunking_method != 'langextract'}")
-        logger.info(f"  chunking_method == 'gpt4': {chunking_method == 'gpt4'}")
-        logger.info(f"[CONFIG] GPT-4 enhancement: {use_gpt4_enhancement}")
-        logger.info(f"[CONFIG] GPT-4 chunking: {use_gpt4_chunking}")
+        logger.info(f"[CONFIG] Configuration Summary:")
+        logger.info(f"  📄 Document Extraction Method: '{extraction_method}'")
+        logger.info(f"  🔗 Document Chunking Method: '{chunking_method}'")
+        logger.info(f"  🚀 GPT-4 Text Enhancement: {use_gpt4_enhancement} {'(for text extraction improvement)' if use_gpt4_enhancement else '(disabled)'}")
+        logger.info(f"  🌐 LangExtract Enhancement: {use_langextract_enhancement} {'(Google GenAI for text extraction)' if use_langextract_enhancement else '(disabled)'}")
+        logger.info(f"  🧩 GPT-4 Chunking: {use_gpt4_chunking} {'(for document chunking)' if use_gpt4_chunking else '(using ' + chunking_method + ' chunking instead)'}")
+        logger.info(f"[CONFIG] Note: Enhancement improves text extraction quality, while Chunking determines how documents are split.")
         
         # Initialize RAG system with error handling for ChromaDB conflicts
         try:
@@ -640,7 +747,9 @@ def ingest_document_with_improved_chunking(file_path: str, processing_id: str = 
                 chunking_method=chunking_method, 
                 enable_ocr=enable_ocr,
                 use_gpt4_enhancement=use_gpt4_enhancement,
-                use_gpt4_chunking=use_gpt4_chunking
+                use_gpt4_chunking=use_gpt4_chunking,
+                use_langextract_enhancement=use_langextract_enhancement,
+                prefer_private_gpt4=prefer_private_gpt4
             )
         except Exception as chroma_error:
             if "already exists" in str(chroma_error):
@@ -653,7 +762,9 @@ def ingest_document_with_improved_chunking(file_path: str, processing_id: str = 
                     chunking_method=chunking_method, 
                     enable_ocr=enable_ocr,
                     use_gpt4_enhancement=use_gpt4_enhancement,
-                    use_gpt4_chunking=use_gpt4_chunking
+                    use_gpt4_chunking=use_gpt4_chunking,
+                    use_langextract_enhancement=use_langextract_enhancement,
+                    prefer_private_gpt4=prefer_private_gpt4
                 )
             else:
                 raise chroma_error
@@ -680,7 +791,7 @@ def ingest_document_with_improved_chunking(file_path: str, processing_id: str = 
             
             update_progress(100, f"Document processed successfully with improved chunking. {chunks_count} chunks created.")
             
-            return {
+            result = {
                 'success': True,
                 'total_chunks': chunks_count,
                 'extraction_method': 'improved_chunking',
@@ -688,6 +799,22 @@ def ingest_document_with_improved_chunking(file_path: str, processing_id: str = 
                 'document_id': doc_id,
                 'message': f"Document processed successfully with improved chunking. {chunks_count} chunks created."
             }
+            
+            # Debug logging: Log the successful processing result
+            try:
+                from debug_json_logger import debug_logger
+                debug_data = {
+                    "file_path": file_path,
+                    "processing_id": processing_id,
+                    "config_used": passed_config,
+                    "result": result,
+                    "stage": "processing_complete"
+                }
+                debug_logger.log_document_processing(filename, debug_data, passed_config)
+            except Exception as e:
+                print(f"[DEBUG] Failed to log processing result: {e}")
+            
+            return result
         else:
             return {
                 'success': False,
@@ -888,17 +1015,19 @@ def upload_file():
         enable_ocr = extraction_config.get('ocr', {}).get('enabled', False)
         extraction_method = extraction_config.get('extraction_method', 'auto')
         use_improved_chunking = extraction_config.get('chunking', {}).get('use_improved_chunking', True)
+        prefer_private_gpt4 = extraction_config.get('chunking', {}).get('prefer_private_gpt4', True)
         
         logger.info(f"[UPLOAD] Captured session config before background thread:")
         logger.info(f"  chunking_method: '{chunking_method}'")
         logger.info(f"  extraction_method: '{extraction_method}'")
         logger.info(f"  enable_ocr: {enable_ocr}")
         logger.info(f"  use_improved_chunking: {use_improved_chunking}")
+        logger.info(f"  prefer_private_gpt4: {prefer_private_gpt4}")
         
         # Start async processing
         def process_document_async():
             # Capture the config variables in the function scope
-            nonlocal chunking_method, extraction_method, enable_ocr, use_improved_chunking
+            nonlocal chunking_method, extraction_method, enable_ocr, use_improved_chunking, prefer_private_gpt4
             
             try:
                 processing_status[processing_id]['progress'] = 10
@@ -920,7 +1049,8 @@ def upload_file():
                             passed_config={
                                 'chunking_method': chunking_method,
                                 'extraction_method': extraction_method,
-                                'enable_ocr': enable_ocr
+                                'enable_ocr': enable_ocr,
+                                'prefer_private_gpt4': prefer_private_gpt4
                             }
                         )
                     else:
@@ -948,15 +1078,8 @@ def upload_file():
                     # Use general document processing for other file types
                     from document_rag import DocumentRAG
                     
-                    # Get chunking method and OCR configuration
-                    try:
-                        extraction_config = session.get('extraction_config', {})
-                        chunking_method = extraction_config.get('chunking', {}).get('method', 'semantic')
-                        enable_ocr = extraction_config.get('ocr', {}).get('enabled', False)
-                    except RuntimeError:
-                        # No request context, use default
-                        chunking_method = 'semantic'
-                        enable_ocr = False
+                    # Use already captured chunking method and OCR configuration
+                    # chunking_method and enable_ocr are already available from outer scope
                     
                     rag = DocumentRAG(chunking_method=chunking_method, enable_ocr=enable_ocr)
                     result = rag.ingest_document(filepath)
@@ -1054,6 +1177,18 @@ def query():
         question = request.form.get('question', '').strip()
         if not question:
             return jsonify({'error': 'No question provided'}), 400
+        
+        # Debug logging: Log the incoming query
+        try:
+            from debug_json_logger import debug_logger
+            debug_data = {
+                "question": question,
+                "form_data": dict(request.form),
+                "stage": "query_start"
+            }
+            debug_logger.log_query_result(question, debug_data)
+        except Exception as e:
+            print(f"[DEBUG] Failed to log query start: {e}")
         
         # Search for relevant chunks using hybrid search
         try:
@@ -2295,7 +2430,7 @@ def api_get_extraction_config():
     try:
         # Default configuration
         config = {
-            'extraction_method': 'auto',  # auto, gpt4_enhanced, traditional
+            'extraction_method': 'auto',  # auto, gpt4_enhanced, langextract, traditional
             'gpt4_model': 'gpt-4o',
             'prefer_private_gpt4': True,  # Prefer Private GPT-4 over other providers
             'features': {
@@ -2318,6 +2453,13 @@ def api_get_extraction_config():
         if 'extraction_config' in session:
             config.update(session['extraction_config'])
         
+        # Debug logging: Log the loaded configuration
+        try:
+            from debug_json_logger import debug_logger
+            debug_logger.log_configuration(config, "extraction_loaded")
+        except Exception as e:
+            print(f"[DEBUG] Failed to log loaded config: {e}")
+        
         return jsonify(config)
         
     except Exception as e:
@@ -2333,8 +2475,15 @@ def api_save_extraction_config():
         if not data:
             return jsonify({'error': 'No configuration data provided'}), 400
         
+        # Debug logging: Log the incoming configuration
+        try:
+            from debug_json_logger import debug_logger
+            debug_logger.log_configuration(data, "extraction_save")
+        except Exception as e:
+            print(f"[DEBUG] Failed to log configuration: {e}")
+        
         # Validate configuration
-        valid_methods = ['auto', 'gpt4_enhanced', 'traditional']
+        valid_methods = ['auto', 'gpt4_enhanced', 'traditional', 'langextract']
         if data.get('extraction_method') not in valid_methods:
             return jsonify({'error': f'Invalid extraction method. Must be one of: {valid_methods}'}), 400
         
@@ -2365,6 +2514,13 @@ def api_save_extraction_config():
                 'prefer_private_gpt4': data.get('chunking', {}).get('prefer_private_gpt4', True)
             }
         }
+        
+        # Debug logging: Log the saved session configuration
+        try:
+            from debug_json_logger import debug_logger
+            debug_logger.log_configuration(session['extraction_config'], "extraction_session_saved")
+        except Exception as e:
+            print(f"[DEBUG] Failed to log session config: {e}")
         
         logger.info(f"Extraction configuration saved: {session['extraction_config']}")
         

@@ -326,25 +326,43 @@ Extract all sections, lists, and key information while preserving the document's
                     # If no JSON found, try to parse the entire response
                     result = json.loads(response_text)
                 
+                # Merge any split lists to preserve complete objective lists
+                components = result.get('extracted_components', [])
+                merged_components = self._merge_split_lists(components)
+                logger.info(f"Original components: {len(components)}, After list merging: {len(merged_components)}")
+                
                 # Convert to LangExtractChunk objects
                 chunks = []
-                for i, component in enumerate(result.get('extracted_components', [])):
+                for i, component in enumerate(merged_components):
+                    # Handle content that might be a list or string
+                    raw_content = component.get('content', '')
+                    if isinstance(raw_content, list):
+                        content = '\n'.join(str(item) for item in raw_content if item).strip()
+                    else:
+                        content = str(raw_content).strip()
+                    
+                    if not content:
+                        continue
+                    
+                    # Check if this is a complete list
+                    is_complete_list = self._contains_multiple_list_items(content)
+                    
                     chunk = LangExtractChunk(
-                        content=component.get('content', ''),
+                        content=content,
                         chunk_id=f"langextract_{i+1}",
                         section_type=component.get('section_type', 'general'),
                         section_title=component.get('section_title', ''),
-                        chunk_type=component.get('chunk_type', 'extracted'),
+                        chunk_type="complete_list" if is_complete_list else component.get('chunk_type', 'extracted'),
                         semantic_theme=component.get('semantic_theme', 'general'),
-                        list_items=component.get('list_items', []),
+                        list_items=self._extract_list_items(content) if is_complete_list else component.get('list_items', []),
                         start_position=component.get('start_position', 0),
-                        end_position=component.get('end_position', len(component.get('content', ''))),
+                        end_position=component.get('end_position', len(content)),
                         confidence=component.get('confidence', 0.8),
                         extraction_method='langextract_api'
                     )
                     chunks.append(chunk)
                 
-                logger.info(f"LangExtract API extracted {len(chunks)} components")
+                logger.info(f"LangExtract API extracted {len(chunks)} final chunks")
                 return chunks
                 
             except json.JSONDecodeError as e:
@@ -966,6 +984,131 @@ Extract all sections, lists, and key information while preserving the document's
         
         return chunks
     
+    def _merge_split_lists(self, components: List[Dict]) -> List[Dict]:
+        """
+        Merge components that were incorrectly split from complete lists
+        
+        Args:
+            components: List of extracted components
+            
+        Returns:
+            Merged components with complete lists preserved
+        """
+        if not components:
+            return components
+        
+        merged = []
+        current_list_items = []
+        list_title = ""
+        list_type = ""
+        
+        # Roman numeral pattern for detecting list items
+        roman_pattern = re.compile(r'^\s*\(([ivx]+)\)', re.IGNORECASE)
+        number_pattern = re.compile(r'^\s*\((\d+)\)')
+        letter_pattern = re.compile(r'^\s*\(([a-z])\)', re.IGNORECASE)
+        
+        for component in components:
+            content = component.get('content', '').strip()
+            
+            # Check if this component is a list item
+            is_list_item = (roman_pattern.match(content) or 
+                          number_pattern.match(content) or 
+                          letter_pattern.match(content))
+            
+            if is_list_item:
+                # This is a list item, add to current list
+                current_list_items.append(component)
+                if not list_title:
+                    list_title = component.get('title', 'List Items')
+                if not list_type:
+                    if roman_pattern.match(content):
+                        list_type = "roman_objectives"
+                    elif number_pattern.match(content):
+                        list_type = "numbered_list"
+                    else:
+                        list_type = "lettered_list"
+            else:
+                # Not a list item - if we have accumulated list items, merge them
+                if current_list_items:
+                    merged_list = self._create_merged_list_component(current_list_items, list_title, list_type)
+                    merged.append(merged_list)
+                    current_list_items = []
+                    list_title = ""
+                    list_type = ""
+                
+                # Add the non-list component
+                merged.append(component)
+        
+        # Handle any remaining list items
+        if current_list_items:
+            merged_list = self._create_merged_list_component(current_list_items, list_title, list_type)
+            merged.append(merged_list)
+        
+        return merged
+    
+    def _create_merged_list_component(self, list_components: List[Dict], title: str, list_type: str) -> Dict:
+        """
+        Create a single merged component from multiple list item components
+        
+        Args:
+            list_components: List of individual list item components
+            title: Title for the merged list
+            list_type: Type of list (roman_objectives, numbered_list, etc.)
+            
+        Returns:
+            Single merged component containing the complete list
+        """
+        if not list_components:
+            return {}
+        
+        # Combine all content, preserving formatting
+        combined_content = []
+        for component in list_components:
+            content = component.get('content', '').strip()
+            if content:
+                combined_content.append(content)
+        
+        # Create merged component
+        merged_component = {
+            'content': ';\n'.join(combined_content) + '.',  # Join with semicolons for readability
+            'type': 'complete_list',
+            'section_type': list_type,
+            'section_title': title,
+            'list_type': list_type,
+            'confidence': max(comp.get('confidence', 0.7) for comp in list_components),
+            'list_items_count': len(list_components),
+            'semantic_theme': 'objectives' if 'objective' in list_type else 'list_content'
+        }
+        
+        return merged_component
+    
+    def _contains_multiple_list_items(self, content: str) -> bool:
+        """
+        Check if content contains multiple list items (indicating a complete list)
+        
+        Args:
+            content: Text content to check
+            
+        Returns:
+            True if content contains multiple list items
+        """
+        # Count Roman numeral list items
+        roman_items = len(re.findall(r'\([ivx]+\)', content, re.IGNORECASE))
+        if roman_items >= 2:
+            return True
+        
+        # Count numbered list items  
+        number_items = len(re.findall(r'\(\d+\)', content))
+        if number_items >= 2:
+            return True
+            
+        # Count lettered list items
+        letter_items = len(re.findall(r'\([a-z]\)', content, re.IGNORECASE))
+        if letter_items >= 2:
+            return True
+            
+        return False
+    
     def _basic_chunking(self, text: str) -> List[LangExtractChunk]:
         """
         Basic chunking when no sections are detected
@@ -1005,6 +1148,342 @@ Extract all sections, lists, and key information while preserving the document's
             chunks.append(chunk)
         
         return chunks
+    
+    def enhance_text_extraction(self, text: str, file_type: str) -> Dict[str, Any]:
+        """
+        Use Google GenAI to enhance text extraction quality
+        
+        Args:
+            text: Document text to enhance
+            file_type: Type of file being processed (.pdf, .txt, etc.)
+            
+        Returns:
+            Dictionary with enhanced text and metadata
+        """
+        if not self.langextract_available or not self.use_langextract_api:
+            logger.warning("LangExtract API not available, returning original text")
+            return {
+                'enhanced_text': text,
+                'quality_score': 0.7,
+                'processing_notes': 'LangExtract API not available',
+                'extraction_method': 'fallback'
+            }
+        
+        try:
+            # Import Google GenAI components
+            from langchain_google_genai import GoogleGenerativeAI
+            import os
+            
+            # Get API key
+            api_key = self._get_google_api_key()
+            if not api_key:
+                raise ValueError("Google API key not available")
+            
+            # Initialize Google Generative AI
+            genai = GoogleGenerativeAI(
+                model="gemini-1.5-flash",
+                google_api_key=api_key,
+                temperature=0.1,
+                max_output_tokens=8192
+            )
+            
+            # Create enhancement prompt
+            enhancement_prompt = f"""You are an expert text extraction enhancer. Analyze the following document text and improve its quality by:
+
+1. **Correcting OCR errors** and text extraction artifacts
+2. **Preserving document structure** including sections, lists, and formatting
+3. **Standardizing formatting** while maintaining semantic meaning
+4. **Extracting metadata** about the document (title, author, date, type, purpose)
+
+Original text to enhance:
+{text}
+
+Return a JSON response with this structure:
+{{
+  "enhanced_text": "cleaned and improved text with proper formatting",
+  "quality_score": 0.95,
+  "processing_notes": "description of improvements made",
+  "extracted_metadata": {{
+    "title": "document title",
+    "author": "author if available",
+    "date": "date if available", 
+    "document_type": "type of document",
+    "purpose": "document purpose/summary",
+    "sections": ["list", "of", "section", "titles"],
+    "tables": ["list of tables found"],
+    "lists": ["list of numbered/bulleted lists found"]
+  }}
+}}"""
+
+            logger.info("Calling Google GenAI API for text enhancement...")
+            response = genai.invoke(enhancement_prompt)
+            
+            # Parse response
+            response_text = response if isinstance(response, str) else str(response)
+            
+            # Extract JSON from response
+            json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
+            if json_match:
+                result = json.loads(json_match.group())
+            else:
+                result = json.loads(response_text)
+            
+            # Validate and return result
+            enhanced_result = {
+                'enhanced_text': result.get('enhanced_text', text),
+                'quality_score': result.get('quality_score', 0.8),
+                'processing_notes': result.get('processing_notes', 'LangExtract text enhancement completed'),
+                'extracted_metadata': result.get('extracted_metadata', {}),
+                'extraction_method': 'langextract_enhancement'
+            }
+            
+            logger.info(f"LangExtract text enhancement completed (quality: {enhanced_result['quality_score']})")
+            return enhanced_result
+            
+        except Exception as e:
+            logger.error(f"LangExtract text enhancement error: {e}")
+            return {
+                'enhanced_text': text,
+                'quality_score': 0.7,
+                'processing_notes': f'LangExtract enhancement failed: {str(e)}',
+                'extraction_method': 'fallback'
+            }
+    
+    def extract_structured_data(self, text: str, data_types: List[str]) -> Dict[str, Any]:
+        """
+        Extract specific structured data types using Google GenAI
+        
+        Args:
+            text: Document text to analyze
+            data_types: List of data types to extract (e.g., ['dates', 'names', 'amounts'])
+            
+        Returns:
+            Dictionary with extracted structured data
+        """
+        if not self.langextract_available or not self.use_langextract_api:
+            logger.warning("LangExtract API not available for structured data extraction")
+            return {
+                'extracted_data': {data_type: [] for data_type in data_types},
+                'confidence_scores': {data_type: 0.5 for data_type in data_types},
+                'processing_summary': 'LangExtract API not available'
+            }
+        
+        try:
+            # Import Google GenAI components
+            from langchain_google_genai import GoogleGenerativeAI
+            
+            # Get API key
+            api_key = self._get_google_api_key()
+            if not api_key:
+                raise ValueError("Google API key not available")
+            
+            # Initialize Google Generative AI
+            genai = GoogleGenerativeAI(
+                model="gemini-1.5-flash",
+                google_api_key=api_key,
+                temperature=0.1,
+                max_output_tokens=4096
+            )
+            
+            # Create structured extraction prompt
+            data_types_str = "', '".join(data_types)
+            extraction_prompt = f"""You are an expert data extraction specialist. Analyze the following document and extract specific types of structured data.
+
+Data types to extract: [{data_types_str}]
+
+For each data type, find all relevant instances in the document and provide confidence scores.
+
+Document text:
+{text}
+
+Return a JSON response with this structure:
+{{
+  "extracted_data": {{
+    "dates": ["2024-01-15", "March 2024"],
+    "names": ["John Smith", "ABC Corporation"],
+    "amounts": ["$1,000", "50%", "100 units"],
+    "key_terms": ["important term 1", "key concept 2"],
+    "locations": ["New York", "Building A"],
+    "emails": ["contact@example.com"],
+    "phone_numbers": ["+1-555-0123"]
+  }},
+  "confidence_scores": {{
+    "dates": 0.95,
+    "names": 0.90,
+    "amounts": 0.85,
+    "key_terms": 0.80,
+    "locations": 0.75,
+    "emails": 0.95,
+    "phone_numbers": 0.90
+  }},
+  "processing_summary": "Found X dates, Y names, Z amounts in the document"
+}}
+
+Only include data types that were requested: [{data_types_str}]"""
+
+            logger.info(f"Calling Google GenAI API for structured data extraction: {data_types}")
+            response = genai.invoke(extraction_prompt)
+            
+            # Parse response
+            response_text = response if isinstance(response, str) else str(response)
+            
+            # Extract JSON from response
+            json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
+            if json_match:
+                result = json.loads(json_match.group())
+            else:
+                result = json.loads(response_text)
+            
+            # Filter to only requested data types
+            filtered_data = {}
+            filtered_scores = {}
+            
+            for data_type in data_types:
+                filtered_data[data_type] = result.get('extracted_data', {}).get(data_type, [])
+                filtered_scores[data_type] = result.get('confidence_scores', {}).get(data_type, 0.7)
+            
+            extraction_result = {
+                'extracted_data': filtered_data,
+                'confidence_scores': filtered_scores,
+                'processing_summary': result.get('processing_summary', f'Extracted {len(data_types)} data types using LangExtract')
+            }
+            
+            logger.info(f"LangExtract structured data extraction completed for: {data_types}")
+            return extraction_result
+            
+        except Exception as e:
+            logger.error(f"LangExtract structured data extraction error: {e}")
+            return {
+                'extracted_data': {data_type: [] for data_type in data_types},
+                'confidence_scores': {data_type: 0.5 for data_type in data_types},
+                'processing_summary': f'LangExtract extraction failed: {str(e)}'
+            }
+    
+    def generate_document_summary(self, text: str, summary_type: str = "comprehensive") -> Dict[str, Any]:
+        """
+        Generate document summaries using Google GenAI
+        
+        Args:
+            text: Document text to summarize
+            summary_type: Type of summary (comprehensive, brief, executive, technical)
+            
+        Returns:
+            Dictionary with document summary
+        """
+        if not self.langextract_available or not self.use_langextract_api:
+            logger.warning("LangExtract API not available for document summarization")
+            return {
+                'summary': 'LangExtract API not available for summarization',
+                'key_points': [],
+                'summary_type': summary_type,
+                'confidence': 0.5
+            }
+        
+        try:
+            # Import Google GenAI components
+            from langchain_google_genai import GoogleGenerativeAI
+            
+            # Get API key
+            api_key = self._get_google_api_key()
+            if not api_key:
+                raise ValueError("Google API key not available")
+            
+            # Initialize Google Generative AI
+            genai = GoogleGenerativeAI(
+                model="gemini-1.5-flash",
+                google_api_key=api_key,
+                temperature=0.2,
+                max_output_tokens=2048
+            )
+            
+            # Create summary prompt based on type
+            if summary_type == "brief":
+                summary_instruction = "Create a brief 2-3 sentence summary highlighting the main purpose and key points."
+            elif summary_type == "executive":
+                summary_instruction = "Create an executive summary suitable for business stakeholders, focusing on decisions, outcomes, and implications."
+            elif summary_type == "technical":
+                summary_instruction = "Create a technical summary focusing on specifications, methodologies, and technical details."
+            else:  # comprehensive
+                summary_instruction = "Create a comprehensive summary covering all major topics, sections, and important details."
+            
+            summary_prompt = f"""You are an expert document analyzer. {summary_instruction}
+
+Document text:
+{text}
+
+Return a JSON response with this structure:
+{{
+  "summary": "comprehensive summary text",
+  "key_points": [
+    "key point 1",
+    "key point 2", 
+    "key point 3"
+  ],
+  "summary_type": "{summary_type}",
+  "confidence": 0.95,
+  "word_count": 150,
+  "main_topics": ["topic 1", "topic 2", "topic 3"]
+}}"""
+
+            logger.info(f"Calling Google GenAI API for document summarization: {summary_type}")
+            response = genai.invoke(summary_prompt)
+            
+            # Parse response
+            response_text = response if isinstance(response, str) else str(response)
+            
+            # Extract JSON from response
+            json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
+            if json_match:
+                result = json.loads(json_match.group())
+            else:
+                result = json.loads(response_text)
+            
+            summary_result = {
+                'summary': result.get('summary', 'Summary generation failed'),
+                'key_points': result.get('key_points', []),
+                'summary_type': summary_type,
+                'confidence': result.get('confidence', 0.8),
+                'word_count': result.get('word_count', len(result.get('summary', '').split())),
+                'main_topics': result.get('main_topics', [])
+            }
+            
+            logger.info(f"LangExtract document summarization completed: {summary_type}")
+            return summary_result
+            
+        except Exception as e:
+            logger.error(f"LangExtract document summarization error: {e}")
+            return {
+                'summary': f'Summarization failed: {str(e)}',
+                'key_points': [],
+                'summary_type': summary_type,
+                'confidence': 0.5
+            }
+    
+    def _get_google_api_key(self) -> Optional[str]:
+        """
+        Get Google API key from AWS Secrets Manager or environment variables
+        
+        Returns:
+            Google API key or None if not found
+        """
+        # Try AWS Secrets Manager first
+        try:
+            from aws_secrets import get_google_api_key
+            api_key = get_google_api_key()
+            if api_key:
+                return api_key
+        except Exception:
+            pass
+        
+        # Fallback to environment variables
+        try:
+            from dotenv import load_dotenv
+            load_dotenv('.env.local')
+        except ImportError:
+            pass
+        
+        import os
+        return os.getenv('GOOGLE_API_KEY')
 
 # Example usage and testing
 if __name__ == "__main__":
@@ -1052,9 +1531,3 @@ The Contractor must continuously seek ways to improve services to better achieve
         print(f"Confidence: {chunk.confidence}")
         print(f"Extraction Method: {chunk.extraction_method}")
         print(f"List Items: {len(chunk.list_items)}")
-        print(f"Content Preview: {chunk.content[:100]}...")
-        
-        if chunk.list_items:
-            print("List Items Found:")
-            for item in chunk.list_items:
-                print(f"  {item['number']}. {item['text'][:50]}...")

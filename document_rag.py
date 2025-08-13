@@ -618,13 +618,17 @@ class DocumentRAG:
                  chunking_method: str = "semantic",
                  enable_ocr: bool = False,
                  use_gpt4_enhancement: bool = True,
-                 use_gpt4_chunking: bool = True):
+                 use_gpt4_chunking: bool = True,
+                 use_langextract_enhancement: bool = False,
+                 prefer_private_gpt4: bool = True):
         
         self.model_name = model_name
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
         self.chunking_method = chunking_method
         self.enable_ocr = enable_ocr
+        self.use_langextract_enhancement = use_langextract_enhancement
+        self.prefer_private_gpt4 = prefer_private_gpt4
         
         # Initialize components
         self.document_processor = DocumentProcessor(
@@ -824,6 +828,45 @@ RESPONSE FORMAT:
                 sys.stdout.flush()
                 return f"Document {doc_data['filename']} already exists in the database"
             
+            # Apply LangExtract enhancement if enabled
+            if self.use_langextract_enhancement:
+                print("[DEBUG] Applying LangExtract text enhancement...")
+                sys.stdout.flush()
+                try:
+                    from langextract_chunking import LangExtractChunker
+                    enhancer = LangExtractChunker(use_langextract_api=True)
+                    
+                    if enhancer.langextract_available:
+                        # Get file extension
+                        file_ext = os.path.splitext(file_path)[1].lower()
+                        
+                        # Enhance text using LangExtract
+                        enhancement_result = enhancer.enhance_text_extraction(doc_data['text'], file_ext)
+                        
+                        # Extract structured data using LangExtract
+                        structured_data = enhancer.extract_structured_data(
+                            enhancement_result['enhanced_text'], 
+                            ['dates', 'names', 'amounts', 'key_terms']
+                        )
+                        
+                        # Update doc_data with enhanced information
+                        doc_data['text'] = enhancement_result['enhanced_text']
+                        doc_data['langextract_enhancement'] = enhancement_result
+                        doc_data['structured_data'] = structured_data
+                        
+                        print(f"[LangExtract] Text enhancement completed (quality: {enhancement_result['quality_score']})")
+                        print(f"[LangExtract] Enhanced text length: {len(enhancement_result['enhanced_text'])}")
+                        print(f"[LangExtract] Extracting structured data: {list(structured_data['extracted_data'].keys())}")
+                        sys.stdout.flush()
+                    else:
+                        print("[LangExtract] API not available, using original text")
+                        sys.stdout.flush()
+                        
+                except Exception as e:
+                    print(f"[LangExtract] Enhancement failed: {e}")
+                    print("[LangExtract] Using original text")
+                    sys.stdout.flush()
+            
             # Validate text content
             if len(doc_data['text'].strip()) < 50:
                 print("[DEBUG] Insufficient text content")
@@ -836,6 +879,10 @@ RESPONSE FORMAT:
             # Get chunking method from configuration (default to semantic)
             chunking_method_config = getattr(self, 'chunking_method', 'semantic')
             
+            # Initialize chunks and chunking_method
+            chunks = None
+            chunking_method = None
+            
             # Try LangExtract chunking first if configured and available
             if chunking_method_config == 'langextract' and self.use_langextract_chunking and self.langextract_chunker:
                 try:
@@ -847,16 +894,16 @@ RESPONSE FORMAT:
                         chunks = [chunk.content for chunk in langextract_chunks]
                         chunking_method = "langextract_intelligent"
                         
-                        # Store LangExtract metadata for later use
+                        # Store LangExtract metadata for later use (ChromaDB-compatible types only)
                         self.langextract_metadata = {
                             chunk.chunk_id: {
-                                'section_type': chunk.section_type,
-                                'section_title': chunk.section_title,
-                                'chunk_type': chunk.chunk_type,
-                                'semantic_theme': chunk.semantic_theme,
-                                'list_items': chunk.list_items,
-                                'confidence': chunk.confidence,
-                                'extraction_method': chunk.extraction_method
+                                'section_type': str(chunk.section_type) if chunk.section_type else '',
+                                'section_title': str(chunk.section_title) if chunk.section_title else '',
+                                'chunk_type': str(chunk.chunk_type) if chunk.chunk_type else '',
+                                'semantic_theme': str(chunk.semantic_theme) if chunk.semantic_theme else '',
+                                'list_items_count': len(chunk.list_items) if chunk.list_items else 0,  # Convert list to count
+                                'confidence': float(chunk.confidence) if chunk.confidence else 0.0,
+                                'extraction_method': str(chunk.extraction_method) if chunk.extraction_method else ''
                             } for chunk in langextract_chunks
                         }
                     else:
@@ -874,32 +921,36 @@ RESPONSE FORMAT:
                     print("[DEBUG] Attempting semantic chunking...")
                     semantic_chunks = self.semantic_chunker.chunk_document(doc_data['text'])
                     
-                    if semantic_chunks:
+                    if semantic_chunks is not None and len(semantic_chunks) > 0:
                         print(f"[DEBUG] Semantic chunking successful: {len(semantic_chunks)} chunks")
                         chunks = [chunk.content for chunk in semantic_chunks]
                         chunking_method = "semantic_intelligent"
                         
-                        # Store semantic metadata for later use
+                        # Store semantic metadata for later use (ChromaDB-compatible types only)
                         self.semantic_metadata = {
                             chunk.chunk_id: {
-                                'section_number': chunk.section_number,
-                                'section_title': chunk.section_title,
-                                'chunk_type': chunk.chunk_type,
-                                'semantic_theme': chunk.semantic_theme,
-                                'list_items': chunk.list_items
+                                'section_number': str(chunk.section_number) if chunk.section_number else '',
+                                'section_title': str(chunk.section_title) if chunk.section_title else '',
+                                'chunk_type': str(chunk.chunk_type) if chunk.chunk_type else '',
+                                'semantic_theme': str(chunk.semantic_theme) if chunk.semantic_theme else '',
+                                'list_items_count': len(chunk.list_items) if chunk.list_items else 0  # Convert list to count
                             } for chunk in semantic_chunks
                         }
                     else:
-                        print("[DEBUG] Semantic chunking failed, trying GPT-4...")
-                        raise Exception("No chunks generated")
+                        print("[DEBUG] Semantic chunking returned no chunks, using traditional chunking instead")
+                        # Use traditional chunking instead of falling back to GPT-4
+                        chunks = self.text_splitter.split_text(doc_data['text'])
+                        chunking_method = "traditional_fallback"
                         
                 except Exception as e:
                     print(f"[DEBUG] Semantic chunking error: {e}")
-                    # Fallback to GPT-4 chunking
-                    chunking_method_config = 'gpt4'
+                    # Use traditional chunking instead of falling back to GPT-4
+                    print("[DEBUG] Using traditional chunking due to semantic chunking error")
+                    chunks = self.text_splitter.split_text(doc_data['text'])
+                    chunking_method = "traditional_fallback"
             
-            # Try GPT-4 chunking if configured or as fallback
-            if chunking_method_config == 'gpt4' and self.document_processor.use_gpt4_chunking and self.document_processor.gpt4_chunker:
+            # Try GPT-4 chunking if configured or as fallback (only if no chunks yet)
+            elif chunking_method_config == 'gpt4' and self.document_processor.use_gpt4_chunking and self.document_processor.gpt4_chunker:
                 try:
                     print("[DEBUG] Attempting GPT-4 chunking...")
                     # Determine document type based on file extension
@@ -910,7 +961,7 @@ RESPONSE FORMAT:
                         doc_data['text'], 
                         document_type=document_type, 
                         preserve_structure=True,
-                        prefer_private_gpt4=True
+                        prefer_private_gpt4=self.prefer_private_gpt4
                     )
                     
                     if gpt4_chunking_result.get('success') and gpt4_chunking_result.get('chunks'):
@@ -928,12 +979,47 @@ RESPONSE FORMAT:
                     # Fallback to traditional chunking
                     chunks = self.text_splitter.split_text(doc_data['text'])
                     chunking_method = "traditional_fallback"
-            else:
-                # Use traditional chunking as final fallback
+            
+            # If no chunks have been generated yet, use traditional chunking as final fallback
+            if chunks is None:
+                print("[DEBUG] No chunking method succeeded, using traditional chunking as final fallback")
                 chunks = self.text_splitter.split_text(doc_data['text'])
                 chunking_method = "traditional"
             
             print(f"[DEBUG] Number of chunks: {len(chunks)} (method: {chunking_method})")
+            
+            # Debug logging: Log the created chunks
+            try:
+                from debug_json_logger import debug_logger
+                chunks_data = []
+                for i, chunk in enumerate(chunks):
+                    chunk_dict = {
+                        "chunk_index": i,
+                        "content": chunk.get_content() if hasattr(chunk, 'get_content') else str(chunk),
+                        "chunk_type": getattr(chunk, 'chunk_type', 'unknown'),
+                        "tokens": getattr(chunk, 'tokens', len(str(chunk).split())),
+                        "metadata": getattr(chunk, 'metadata', {})
+                    }
+                    # Handle different chunk formats
+                    if hasattr(chunk, 'page_content'):
+                        chunk_dict["content"] = chunk.page_content
+                        chunk_dict["metadata"] = getattr(chunk, 'metadata', {})
+                    chunks_data.append(chunk_dict)
+                
+                debug_logger.log_chunks(
+                    doc_data.get('filename', 'unknown'),
+                    chunks_data,
+                    chunking_method,
+                    {
+                        "total_chunks": len(chunks),
+                        "text_length": doc_data.get('text_length', 0),
+                        "chunking_config": chunking_method_config,
+                        "extraction_method": doc_data.get('extraction_method', 'unknown')
+                    }
+                )
+            except Exception as e:
+                print(f"[DEBUG] Failed to log chunks: {e}")
+            
             sys.stdout.flush()
             if not chunks:
                 print("[DEBUG] No chunks generated")
@@ -957,18 +1043,18 @@ RESPONSE FORMAT:
             metadatas = []
             for i, chunk in enumerate(chunks):
                 metadata = {
-                    "filename": doc_data['filename'],
-                    "filepath": doc_data['filepath'],
-                    "file_type": doc_data['file_type'],
-                    "doc_hash": doc_data['doc_hash'],
-                    "chunk_index": i,
-                    "total_chunks": len(chunks),
-                    "text_length": doc_data['text_length'],
-                    "extraction_method": doc_data['extraction_method'],
-                    "processed_time": doc_data['processed_time'],
-                    "document_id": doc_id,
+                    "filename": str(doc_data['filename']),
+                    "filepath": str(doc_data['filepath']),
+                    "file_type": str(doc_data['file_type']),
+                    "doc_hash": str(doc_data['doc_hash']),
+                    "chunk_index": int(i),
+                    "total_chunks": int(len(chunks)),
+                    "text_length": int(doc_data['text_length']),
+                    "extraction_method": str(doc_data['extraction_method']),
+                    "processed_time": str(doc_data['processed_time']),
+                    "document_id": str(doc_id),
                     "upload_timestamp": str(timestamp),
-                    "chunking_method": chunking_method
+                    "chunking_method": str(chunking_method)
                 }
                 
                 # Add LangExtract chunking metadata if available
@@ -978,13 +1064,14 @@ RESPONSE FORMAT:
                         langextract_info = self.langextract_metadata[langextract_chunk_id]
                         metadata.update({
                             "langextract_chunked": True,
-                            "chunk_type": langextract_info.get('chunk_type', 'extracted'),
-                            "section_type": langextract_info.get('section_type', ''),
-                            "section_title": langextract_info.get('section_title', ''),
-                            "semantic_theme": langextract_info.get('semantic_theme', ''),
-                            "confidence": langextract_info.get('confidence', 0.8),
-                            "extraction_method": langextract_info.get('extraction_method', 'fallback'),
-                            "quality_score": langextract_info.get('confidence', 0.8)
+                            "chunk_type": str(langextract_info.get('chunk_type', 'extracted')),
+                            "section_type": str(langextract_info.get('section_type', '')),
+                            "section_title": str(langextract_info.get('section_title', '')),
+                            "semantic_theme": str(langextract_info.get('semantic_theme', '')),
+                            "confidence": float(langextract_info.get('confidence', 0.8)),
+                            "extraction_method": str(langextract_info.get('extraction_method', 'fallback')),
+                            "quality_score": float(langextract_info.get('confidence', 0.8)),
+                            "list_items_count": int(langextract_info.get('list_items_count', 0))
                         })
                     else:
                         metadata.update({
@@ -1004,11 +1091,12 @@ RESPONSE FORMAT:
                         semantic_info = self.semantic_metadata[semantic_chunk_id]
                         metadata.update({
                             "gpt4_chunked": True,
-                            "chunk_type": semantic_info.get('chunk_type', 'semantic'),
-                            "section_number": semantic_info.get('section_number', ''),
-                            "section_title": semantic_info.get('section_title', ''),
-                            "semantic_theme": semantic_info.get('semantic_theme', ''),
-                            "quality_score": 0.9  # High quality for semantic chunks
+                            "chunk_type": str(semantic_info.get('chunk_type', 'semantic')),
+                            "section_number": str(semantic_info.get('section_number', '')),
+                            "section_title": str(semantic_info.get('section_title', '')),
+                            "semantic_theme": str(semantic_info.get('semantic_theme', '')),
+                            "quality_score": 0.9,  # High quality for semantic chunks
+                            "list_items_count": int(semantic_info.get('list_items_count', 0))
                         })
                     else:
                         metadata.update({
@@ -1024,11 +1112,11 @@ RESPONSE FORMAT:
                     gpt4_chunk = gpt4_chunking_result['chunks'][i]
                     metadata.update({
                         "gpt4_chunked": True,
-                        "chunk_type": gpt4_chunk.get('chunk_type', 'paragraph'),
-                        "section_number": gpt4_chunk.get('section_number', ''),
-                        "section_title": gpt4_chunk.get('section_title', ''),
-                        "semantic_theme": gpt4_chunk.get('semantic_theme', ''),
-                        "quality_score": gpt4_chunk.get('quality_score', 0.8)
+                        "chunk_type": str(gpt4_chunk.get('chunk_type', 'paragraph')),
+                        "section_number": str(gpt4_chunk.get('section_number', '')),
+                        "section_title": str(gpt4_chunk.get('section_title', '')),
+                        "semantic_theme": str(gpt4_chunk.get('semantic_theme', '')),
+                        "quality_score": float(gpt4_chunk.get('quality_score', 0.8))
                     })
                 else:
                     metadata["gpt4_chunked"] = False

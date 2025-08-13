@@ -162,6 +162,10 @@ class GPT4Chunker:
     def _create_chunking_prompt(self, text: str, document_type: str, preserve_structure: bool) -> str:
         """Create a specialized chunking prompt based on document type"""
         
+        # Calculate text length and suggest appropriate number of chunks
+        text_length = len(text)
+        suggested_chunks = max(2, min(8, text_length // self.default_chunk_size + 1))
+        
         type_instructions = {
             "legal": """
             LEGAL DOCUMENT CHUNKING RULES:
@@ -169,92 +173,150 @@ class GPT4Chunker:
             - Keep related subsections together
             - Maintain cross-references within chunks
             - Preserve numbered lists and hierarchical structure
+            - Split by sections, subsections, or logical boundaries
             """,
             "technical": """
             TECHNICAL DOCUMENT CHUNKING RULES:
             - Keep code blocks and examples together
             - Preserve technical specifications
             - Maintain step-by-step procedures
+            - Split by topics, procedures, or technical sections
             """,
             "general": """
             GENERAL DOCUMENT CHUNKING RULES:
             - Keep complete sentences and paragraphs
             - Preserve logical flow and context
             - Maintain document structure
+            - Split by topics, paragraphs, or natural boundaries
             """
         }
         
         chunking_rules = type_instructions.get(document_type, type_instructions["general"])
         
-        prompt = f"""
+        prompt = f"""You are an expert document chunking specialist. Analyze the following text and split it into {suggested_chunks} coherent, semantically meaningful chunks for RAG (Retrieval-Augmented Generation) systems.
+
         {chunking_rules}
         
         CHUNKING REQUIREMENTS:
+        - Text length: {text_length} characters
         - Target chunk size: {self.default_chunk_size} characters
-        - Maximum chunk size: {self.max_chunk_size} characters
+        - Maximum chunk size: {self.max_chunk_size} characters  
         - Minimum chunk size: {self.min_chunk_size} characters
+        - Create approximately {suggested_chunks} chunks
         - Preserve structure: {preserve_structure}
+        - Each chunk should be self-contained and coherent
+        - Avoid cutting sentences or important information mid-way
+        - Maintain logical flow between chunks
         
         DOCUMENT TEXT TO CHUNK:
         {text}
         
-        Return the result as JSON with the following structure:
+        Analyze the text and create {suggested_chunks} optimal chunks. Return the result as valid JSON:
+
         {{
             "chunks": [
                 {{
                     "chunk_id": "chunk_1",
-                    "content": "chunk content here",
+                    "content": "First chunk content with complete sentences and context",
                     "start_position": 0,
-                    "end_position": 500,
-                    "chunk_type": "section|paragraph|list|definition",
-                    "section_number": "1.1",
-                    "section_title": "Section Title",
-                    "semantic_theme": "main topic of this chunk",
-                    "quality_score": 0.95
+                    "end_position": 300,
+                    "chunk_type": "header|section|paragraph|list|definition",
+                    "section_number": "1",
+                    "section_title": "Section Title if applicable",
+                    "semantic_theme": "main topic or theme of this chunk",
+                    "quality_score": 0.9
+                }},
+                {{
+                    "chunk_id": "chunk_2", 
+                    "content": "Second chunk content with complete sentences and context",
+                    "start_position": 300,
+                    "end_position": 600,
+                    "chunk_type": "section|paragraph|list",
+                    "section_number": "2",
+                    "section_title": "Section Title if applicable",
+                    "semantic_theme": "main topic or theme of this chunk",
+                    "quality_score": 0.9
                 }}
             ],
             "summary": {{
-                "total_chunks": 5,
-                "average_chunk_size": 850,
+                "total_chunks": {suggested_chunks},
+                "average_chunk_size": 500,
                 "semantic_coherence_score": 0.92,
                 "structure_preservation_score": 0.88
             }}
         }}
         
-        CRITICAL: Return ONLY valid JSON without any markdown formatting, code blocks, or additional text. Start with {{ and end with }}.
+        CRITICAL INSTRUCTIONS:
+        1. Return ONLY valid JSON - no markdown, no code blocks, no additional text
+        2. Start response with {{ and end with }}
+        3. Ensure each chunk has meaningful, complete content
+        4. Make sure chunk content includes full sentences
+        5. Create exactly {suggested_chunks} chunks or more if text requires it
+        6. Never return empty chunks
         """
         
         return prompt
     
     def _parse_chunking_result(self, result: str, original_text: str) -> Dict[str, Any]:
-        """Parse the GPT-4 chunking result"""
+        """Parse the GPT-4 chunking result with enhanced validation"""
         # Clean the result to handle markdown formatting
         cleaned_result = self._clean_json_response(result)
         
         try:
             parsed_result = json.loads(cleaned_result)
             chunks = parsed_result.get('chunks', [])
+            
+            if not chunks:
+                logger.warning("No chunks found in GPT-4 response, using fallback")
+                return self._fallback_chunking(original_text, "general")
+            
             validated_chunks = []
             
             for i, chunk in enumerate(chunks):
+                # Validate chunk content
+                content = chunk.get('content', '').strip()
+                if not content:
+                    logger.warning(f"Empty content in chunk {i+1}, skipping")
+                    continue
+                
+                # Ensure content is meaningful (at least 10 characters)
+                if len(content) < 10:
+                    logger.warning(f"Chunk {i+1} too short ({len(content)} chars), skipping")
+                    continue
+                
                 validated_chunk = {
                     'chunk_id': chunk.get('chunk_id', f'chunk_{i+1}'),
-                    'content': chunk.get('content', ''),
+                    'content': content,
                     'start_position': chunk.get('start_position', 0),
-                    'end_position': chunk.get('end_position', 0),
+                    'end_position': chunk.get('end_position', len(content)),
                     'chunk_type': chunk.get('chunk_type', 'paragraph'),
-                    'section_number': chunk.get('section_number', ''),
-                    'section_title': chunk.get('section_title', ''),
-                    'semantic_theme': chunk.get('semantic_theme', ''),
-                    'quality_score': chunk.get('quality_score', 0.8),
+                    'section_number': str(chunk.get('section_number', '')),
+                    'section_title': str(chunk.get('section_title', '')),
+                    'semantic_theme': str(chunk.get('semantic_theme', '')),
+                    'quality_score': float(chunk.get('quality_score', 0.8)),
                     'gpt4_chunked': True
                 }
                 
                 validated_chunks.append(validated_chunk)
             
+            # Ensure we have at least some valid chunks
+            if not validated_chunks:
+                logger.warning("No valid chunks after validation, using fallback")
+                return self._fallback_chunking(original_text, "general")
+            
+            # If we have less than 2 chunks for a reasonably long text, try to improve
+            if len(validated_chunks) < 2 and len(original_text) > self.default_chunk_size:
+                logger.info(f"Only {len(validated_chunks)} chunks generated for {len(original_text)} chars text, enhancing...")
+                enhanced_chunks = self._enhance_chunk_count(validated_chunks, original_text)
+                if enhanced_chunks:
+                    validated_chunks = enhanced_chunks
+            
             summary = parsed_result.get('summary', {})
             summary['total_chunks'] = len(validated_chunks)
             summary['gpt4_chunking_used'] = True
+            summary['validation_passed'] = True
+            
+            logger.info(f"Successfully parsed {len(validated_chunks)} valid chunks from GPT-4 response")
             
             return {
                 'success': True,
@@ -284,6 +346,28 @@ class GPT4Chunker:
             logger.debug("Extracted JSON from markdown code block")
             return cleaned
         
+        # Check if response starts with ```json and ends with ```
+        if response.strip().startswith('```json') and response.strip().endswith('```'):
+            # Extract content between ```json and ```
+            content = response.strip()
+            start_idx = content.find('```json') + 7
+            end_idx = content.rfind('```')
+            if start_idx < end_idx:
+                cleaned = content[start_idx:end_idx].strip()
+                logger.debug("Extracted JSON from ```json code block")
+                return cleaned
+        
+        # Check if response starts with ``` and ends with ```
+        if response.strip().startswith('```') and response.strip().endswith('```'):
+            # Extract content between ``` and ```
+            content = response.strip()
+            start_idx = content.find('```') + 3
+            end_idx = content.rfind('```')
+            if start_idx < end_idx:
+                cleaned = content[start_idx:end_idx].strip()
+                logger.debug("Extracted JSON from code block")
+                return cleaned
+        
         # If no markdown blocks, try to extract JSON object
         json_object_pattern = r'\{.*\}'
         matches = re.findall(json_object_pattern, response, re.DOTALL)
@@ -297,6 +381,119 @@ class GPT4Chunker:
         # If no JSON found, return the original response
         logger.debug("No JSON formatting detected, using original response")
         return response.strip()
+    
+    def _enhance_chunk_count(self, existing_chunks: List[Dict[str, Any]], original_text: str) -> List[Dict[str, Any]]:
+        """Enhance chunk count by splitting large chunks when too few chunks are generated"""
+        if not existing_chunks:
+            return existing_chunks
+        
+        enhanced_chunks = []
+        
+        for chunk in existing_chunks:
+            content = chunk['content']
+            
+            # If chunk is very large, try to split it
+            if len(content) > self.max_chunk_size:
+                # Split by natural boundaries
+                split_chunks = self._split_large_chunk(content, chunk)
+                enhanced_chunks.extend(split_chunks)
+            else:
+                enhanced_chunks.append(chunk)
+        
+        # If we still have too few chunks for long text, use fallback splitting
+        if len(enhanced_chunks) < 2 and len(original_text) > self.default_chunk_size * 2:
+            logger.info("Still too few chunks, using hybrid approach")
+            return self._hybrid_chunking(original_text, enhanced_chunks)
+        
+        return enhanced_chunks
+    
+    def _split_large_chunk(self, content: str, original_chunk: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Split a large chunk into smaller, more manageable chunks"""
+        # Try to split by natural boundaries: paragraphs, sentences, etc.
+        boundaries = ["\n\n", "\n", ". ", "! ", "? "]
+        
+        for boundary in boundaries:
+            if boundary in content:
+                parts = content.split(boundary)
+                if len(parts) > 1:
+                    chunks = []
+                    current_chunk = ""
+                    chunk_count = 0
+                    
+                    for part in parts:
+                        if not part.strip():
+                            continue
+                            
+                        potential_chunk = current_chunk + part + boundary
+                        
+                        if len(potential_chunk) > self.max_chunk_size and current_chunk:
+                            # Save current chunk
+                            chunk_count += 1
+                            chunks.append({
+                                **original_chunk,
+                                'chunk_id': f"{original_chunk['chunk_id']}_split_{chunk_count}",
+                                'content': current_chunk.strip(),
+                                'start_position': 0,  # Would need proper calculation
+                                'end_position': len(current_chunk.strip())
+                            })
+                            current_chunk = part + boundary
+                        else:
+                            current_chunk = potential_chunk
+                    
+                    # Add remaining content
+                    if current_chunk.strip():
+                        chunk_count += 1
+                        chunks.append({
+                            **original_chunk,
+                            'chunk_id': f"{original_chunk['chunk_id']}_split_{chunk_count}",
+                            'content': current_chunk.strip(),
+                            'start_position': 0,
+                            'end_position': len(current_chunk.strip())
+                        })
+                    
+                    if len(chunks) > 1:
+                        return chunks
+        
+        # If no good split found, return original chunk
+        return [original_chunk]
+    
+    def _hybrid_chunking(self, text: str, gpt4_chunks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Combine GPT-4 chunks with fallback chunking when needed"""
+        from langchain.text_splitter import RecursiveCharacterTextSplitter
+        
+        # Use traditional chunking as backup
+        text_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=self.default_chunk_size,
+            chunk_overlap=self.default_chunk_size // 4,
+            length_function=len,
+            separators=["\n\n", "\n", " ", ""]
+        )
+        
+        fallback_chunks = text_splitter.split_text(text)
+        
+        # If GPT-4 provided good metadata, try to preserve it
+        if gpt4_chunks and len(fallback_chunks) > 1:
+            hybrid_chunks = []
+            gpt4_metadata = gpt4_chunks[0] if gpt4_chunks else {}
+            
+            for i, chunk_content in enumerate(fallback_chunks):
+                hybrid_chunk = {
+                    'chunk_id': f'hybrid_chunk_{i+1}',
+                    'content': chunk_content,
+                    'start_position': 0,
+                    'end_position': len(chunk_content),
+                    'chunk_type': gpt4_metadata.get('chunk_type', 'paragraph'),
+                    'section_number': gpt4_metadata.get('section_number', ''),
+                    'section_title': gpt4_metadata.get('section_title', ''),
+                    'semantic_theme': gpt4_metadata.get('semantic_theme', ''),
+                    'quality_score': 0.7,  # Lower score for hybrid approach
+                    'gpt4_chunked': True  # Partially GPT-4 enhanced
+                }
+                hybrid_chunks.append(hybrid_chunk)
+            
+            return hybrid_chunks
+        
+        return gpt4_chunks
     
     def _fallback_chunking(self, text: str, document_type: str) -> Dict[str, Any]:
         """Fallback chunking method when GPT-4 is not available"""
