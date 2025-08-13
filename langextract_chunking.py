@@ -268,20 +268,22 @@ class LangExtractChunker:
             # Create LangExtract prompt for document structure extraction
             system_prompt = """You are an expert document structure analyzer using LangExtract principles. 
             
-Your task is to analyze the provided document and extract its structural components in a JSON format that includes:
+Extract the complete text from this contract document while preserving the exact hierarchical structure and numbering system. Maintain all:
 
-1. **Sections**: Identify main sections, subsections, and their hierarchical relationships
-2. **Lists**: Extract numbered and bulleted lists with their items
-3. **Key Information**: Identify objectives, definitions, obligations, and other important content
-4. **Semantic Themes**: Categorize content by semantic meaning
+1. Section numbers (e.g., 1, 2, 3...)
+2. Subsection numbers (e.g., 1.1, 1.2, 1.3...)
+3. Alphabetical subdivisions (e.g., (a), (b), (c)...)
+4. Roman numeral subdivisions (e.g., (i), (ii), (iii)...)
+5. Any mixed numbering schemes
 
-For each extracted component, provide:
-- content: The actual text content
-- section_type: The type of section (e.g., "objectives", "definitions", "obligations")
-- section_title: The title or heading
-- semantic_theme: The semantic category
-- confidence: Confidence score (0.0-1.0)
-- list_items: Array of list items if applicable
+Requirements:
+- Preserve exact spacing and indentation
+- Maintain all punctuation marks
+- Keep original paragraph breaks
+- Include all headers, subheaders, and section titles
+- Preserve any special formatting indicators (bold, italics markers)
+- Maintain cross-references exactly as written
+- Include all footnotes and their reference markers
 
 Return the result as a valid JSON object with the structure:
 {
