@@ -94,7 +94,40 @@ class GPT4Chunker:
             response = self.openai_client.chat.completions.create(
                 model=model,
                 messages=[
-                    {"role": "system", "content": "You are an expert document chunking specialist. Split documents into optimal chunks for RAG systems while preserving semantic meaning and document structure."},
+                    {"role": "system", "content": """You are an expert document structure analyzer using LangExtract principles. 
+            
+Extract the complete text from this contract document while preserving the exact hierarchical structure and numbering system. Maintain all:
+
+1. Section numbers (e.g., 1, 2, 3...)
+2. Subsection numbers (e.g., 1.1, 1.2, 1.3...)
+3. Alphabetical subdivisions (e.g., (a), (b), (c)...)
+4. Roman numeral subdivisions (e.g., (i), (ii), (iii)...)
+5. Any mixed numbering schemes
+
+Requirements:
+- Preserve exact spacing and indentation
+- Maintain all punctuation marks
+- Keep original paragraph breaks
+- Include all headers, subheaders, and section titles
+- Preserve any special formatting indicators (bold, italics markers)
+- Maintain cross-references exactly as written
+- Include all footnotes and their reference markers
+
+Return the result as a valid JSON object with the structure:
+{
+  "extracted_components": [
+    {
+      "content": "text content",
+      "section_type": "type",
+      "section_title": "title",
+      "semantic_theme": "theme",
+      "confidence": 0.95,
+      "list_items": [],
+      "start_position": 0,
+      "end_position": 100
+    }
+  ]
+}"""},
                     {"role": "user", "content": chunking_prompt}
                 ],
                 max_tokens=4000,

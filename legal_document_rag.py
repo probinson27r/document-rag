@@ -15,6 +15,19 @@ def is_ordered_list_item(text: str) -> Tuple[bool, str, int]:
     # Remove leading whitespace for pattern matching
     stripped = text.lstrip()
     
+    # First, check if this looks like a standalone page number
+    # Page numbers are typically short, centered, and don't have meaningful content
+    if re.match(r'^\d+$', stripped) and len(stripped) <= 3:
+        # This could be a page number - check if it's isolated
+        return False, '', 0
+    
+    # Check if this is likely a page number in context
+    # Page numbers often appear alone on a line or with minimal formatting
+    if re.match(r'^\d+$', stripped):
+        # If it's just a number and the line is very short, it's likely a page number
+        if len(text.strip()) <= 5:
+            return False, '', 0
+    
     # Patterns for different types of ordered lists
     patterns = [
         # Compact hierarchical patterns (3.2(a)(i), 1.1(a)(1), etc.)
@@ -45,7 +58,10 @@ def is_ordered_list_item(text: str) -> Tuple[bool, str, int]:
         (r'^[a-z]\.\s+', 'alpha_lower', 1),
         
         # Numeric (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, etc.)
-        (r'^\d+\.\s+', 'numeric', 1),
+        # Updated to require more context to avoid matching page numbers
+        (r'^\d+\.\s+[A-Za-z]', 'numeric', 1),  # Must be followed by text content
+        (r'^\d+\.\s+\(', 'numeric', 1),        # Must be followed by parentheses
+        (r'^\d+\.\s+[A-Z][A-Za-z\s]{3,}', 'numeric', 1),  # Must be followed by substantial text
     ]
     
     for pattern, marker_type, base_level in patterns:
@@ -217,58 +233,31 @@ def is_footer_content(text: str) -> bool:
         r'^END OF DIAGRAM',  # End of diagram notices
         r'^END OF ILLUSTRATION',  # End of illustration notices
         r'^END OF PHOTO',  # End of photo notices
-        r'^END OF IMAGE',  # End of image notices
-        r'^END OF PICTURE',  # End of picture notices
-        r'^END OF DRAWING',  # End of drawing notices
-        r'^END OF SKETCH',  # End of sketch notices
-        r'^END OF PLAN',  # End of plan notices
-        r'^END OF MAP',  # End of map notices
     ]
     
-    # Exclude specific reference patterns that should be kept (check these first)
-    exclude_patterns = [
-        r'^Trim Reference:',  # Trim Reference: D20/0342792
-        r'^Reference:',  # Reference: D20/0342792
-        r'^Doc Ref:',  # Doc Ref: D20/0342792
-        r'^Document Reference:',  # Document Reference: D20/0342792
-        r'^Ref:',  # Ref: D20/0342792
-        r'^Document Ref:',  # Document Ref: D20/0342792
-    ]
-    
-    for pattern in exclude_patterns:
-        if re.match(pattern, text, re.IGNORECASE):
-            return False
-    
-    # Check if text matches any footer pattern
+    # Check for footer patterns
     for pattern in footer_patterns:
-        if re.match(pattern, text, re.IGNORECASE):
+        if re.match(pattern, text.strip(), re.IGNORECASE):
             return True
     
-    # Check for very short text that's likely footer content
-    if len(text) <= 5 and text.isdigit():
+    # Additional checks for page numbers in context
+    stripped = text.strip()
+    
+    # Check if this is a standalone page number (very short, just digits)
+    if re.match(r'^\d+$', stripped) and len(stripped) <= 3:
         return True
     
-    # Check for text that's all uppercase and very short (likely headers/footers)
-    # But exclude section headings like "3 OBJECTIVES"
-    if len(text) <= 20 and text.isupper() and not text.isdigit():
-        # Don't filter out section headings that contain numbers
-        if not re.search(r'\d', text):
+    # Check if this is a page number with minimal formatting
+    if re.match(r'^\s*\d+\s*$', stripped) and len(stripped) <= 5:
+        return True
+    
+    # Check if this looks like a page number in a header/footer context
+    # Page numbers often appear with specific formatting or positioning
+    if re.match(r'^\d+$', stripped):
+        # If it's just a number and appears to be isolated, treat as footer
+        # But be more careful about numbers that might be part of content
+        if len(stripped) <= 3 and not any(char.isalpha() for char in text):
             return True
-    
-    # Check for text that contains only common footer words
-    footer_words = {
-        'page', 'copyright', 'confidential', 'draft', 'version', 'rev', 'date', 
-        'generated', 'modified', 'file', 'document', 'prepared', 'approved', 
-        'signed', 'witnessed', 'notary', 'attorney', 'firm', 'address', 'phone', 
-        'email', 'fax', 'website', 'protected', 'privileged', 'final', 'pending', 
-        'review', 'executed', 'effective', 'expires', 'terminated', 'amended', 
-        'supplement', 'addendum', 'schedule', 'exhibit', 'appendix', 'attachment', 
-        'enclosure', 'continued', 'continues', 'end'
-    }
-    
-    words = text.lower().split()
-    if len(words) <= 3 and all(word in footer_words for word in words):
-        return True
     
     return False
 

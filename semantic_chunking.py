@@ -64,13 +64,13 @@ class SemanticChunker:
         ]
         
         self.list_patterns = [
-            r'^(\d+)\.\s+(.+)$',          # 1. First objective
-            r'^\((\d+)\)\s+(.+)$',        # (1) First objective
-            r'^(\d+\))\s+(.+)$',          # 1) First objective
-            r'^([a-z])\.\s+(.+)$',        # a. Sub-objective
-            r'^\(([a-z])\)\s+(.+)$',      # (a) Sub-objective
-            r'^([A-Z])\.\s+(.+)$',        # A. Major objective
-            r'^\(([A-Z])\)\s+(.+)$',      # (A) Major objective
+            r'^(\d+)\.\s+([A-Za-z].*)',          # 1. First objective (must have text)
+            r'^(\d+)\.\s+(\(.*)',                # 1. First objective (must have parentheses)
+            r'^(\d+\))\s+([A-Za-z].*)',          # 1) First objective (must have text)
+            r'^([a-z])\.\s+([A-Za-z].*)',        # a. Sub-objective (must have text)
+            r'^\(([a-z])\)\s+([A-Za-z].*)',      # (a) Sub-objective (must have text)
+            r'^([A-Z])\.\s+([A-Za-z].*)',        # A. Major objective (must have text)
+            r'^\(([A-Z])\)\s+([A-Za-z].*)',      # (A) Major objective (must have text)
         ]
         
         self.objectives_keywords = [

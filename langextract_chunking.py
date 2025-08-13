@@ -102,18 +102,19 @@ class LangExtractChunker:
         
         # Always include basic numbered and letter patterns
         patterns.extend([
-            # Numbered lists
-            r'^(\d+)\.\s+(.+)$',          # 1. First objective
-            r'^\((\d+)\)\s+(.+)$',        # (1) First objective
-            r'^(\d+\))\s+(.+)$',          # 1) First objective
+            # Numbered lists - updated to require more context to avoid page numbers
+            r'^(\d+)\.\s+([A-Za-z].*)',          # 1. First objective (must have text)
+            r'^(\d+)\.\s+(\(.*)',                # 1. First objective (must have parentheses)
+            r'^\((\d+)\)\s+([A-Za-z].*)',        # (1) First objective (must have text)
+            r'^(\d+\))\s+([A-Za-z].*)',          # 1) First objective (must have text)
             
             # Letter lists
-            r'^([a-z])\.\s+(.+)$',        # a. Sub-objective
-            r'^\(([a-z])\)\s+(.+)$',      # (a) Sub-objective
-            r'^([a-z])\)\s+(.+)$',        # a) Sub-objective
-            r'^([A-Z])\.\s+(.+)$',        # A. Major objective
-            r'^\(([A-Z])\)\s+(.+)$',      # (A) Major objective
-            r'^([A-Z])\)\s+(.+)$',        # A) Major objective
+            r'^([a-z])\.\s+([A-Za-z].*)',        # a. Sub-objective (must have text)
+            r'^\(([a-z])\)\s+([A-Za-z].*)',      # (a) Sub-objective (must have text)
+            r'^([a-z])\)\s+([A-Za-z].*)',        # a) Sub-objective (must have text)
+            r'^([A-Z])\.\s+([A-Za-z].*)',        # A. Major objective (must have text)
+            r'^\(([A-Z])\)\s+([A-Za-z].*)',      # (A) Major objective (must have text)
+            r'^([A-Z])\)\s+([A-Za-z].*)',        # A) Major objective (must have text)
         ])
         
         # Add Roman numerals if enabled
@@ -277,6 +278,7 @@ Extract the complete text from this contract document while preserving the exact
 5. Any mixed numbering schemes
 
 Requirements:
+- Ignore text starting with Trim Reference: D20/0342792 or a similar reference to the contract
 - Preserve exact spacing and indentation
 - Maintain all punctuation marks
 - Keep original paragraph breaks

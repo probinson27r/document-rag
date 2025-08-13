@@ -471,13 +471,45 @@ class HybridSearch:
         # Extract section numbers
         section_numbers = self.extract_section_numbers(query)
         
+        # Check if this is a section query
+        is_section = self.is_section_query(query)
+        
         # Check if this is a list query
         is_list = self.is_list_query(query)
         
         # Check if this is an objectives query
         is_objectives = self.is_objectives_query(query)
         
-        if is_list and section_numbers:
+        # Handle section queries (highest priority)
+        if is_section and section_numbers:
+            self.logger.info(f"Section query detected for sections: {section_numbers}")
+            
+            # Use enhanced section search for the primary section
+            primary_section = section_numbers[0]
+            section_results = self.enhanced_section_search(primary_section, query, n_results)
+            
+            if section_results:
+                self.logger.info(f"Found {len(section_results)} enhanced section results")
+                return section_results
+            
+            # Fallback to hybrid search
+            return self.hybrid_search(query, n_results)
+        
+        elif is_section and not section_numbers:
+            self.logger.info("Section query detected without section numbers")
+            
+            # Try to extract section number from query
+            extracted_section = self.extract_section_number_from_query(query)
+            if extracted_section:
+                self.logger.info(f"Extracted section number: {extracted_section}")
+                section_results = self.enhanced_section_search(extracted_section, query, n_results)
+                if section_results:
+                    return section_results
+            
+            # Fallback to hybrid search
+            return self.hybrid_search(query, n_results)
+        
+        elif is_list and section_numbers:
             self.logger.info(f"List query detected for sections: {section_numbers}")
             
             # Check if this is a Section 3.2 objectives query (special handling for chunking issues)
@@ -498,145 +530,193 @@ class HybridSearch:
         elif is_objectives and not section_numbers:
             self.logger.info("Objectives query detected without section numbers")
             
-            # Try to find objectives content specifically
-            try:
-                all_results = self.collection.get()
-                objectives_results = self.find_objectives_content(all_results['documents'])
-                
+            # Use enhanced objectives search for better Section 3.2 prioritization
+            objectives_results = self.enhanced_objectives_search(query, n_results)
+            if objectives_results:
+                self.logger.info(f"Found {len(objectives_results)} objectives-enhanced results")
+                return objectives_results
+            
+            # Fallback to regular search
+            self.logger.info("No objectives results, falling back to regular search")
+            return self.hybrid_search(query, n_results)
+        
+        elif is_objectives and section_numbers:
+            self.logger.info(f"Objectives query detected for sections: {section_numbers}")
+            
+            # Check if this is Section 3.2 objectives
+            if '3.2' in section_numbers:
+                self.logger.info("Section 3.2 objectives query detected - using enhanced objectives search")
+                objectives_results = self.enhanced_objectives_search(query, n_results)
                 if objectives_results:
-                    self.logger.info(f"Found {len(objectives_results)} objectives-specific results")
-                    return objectives_results[:n_results]
-                
-                # Fallback to semantic search with objectives focus
-                self.logger.info("No objectives-specific results, trying semantic search with objectives focus")
-                objectives_queries = [
-                    "objectives of the agreement",
-                    "section 3.2 objectives",
-                    "contract objectives",
-                    "agreement objectives",
-                    "objectives list"
-                ]
-                
-                all_results = []
-                for obj_query in objectives_queries:
-                    results = self.semantic_search(obj_query, n_results=5, distance_threshold=0.9)
-                    all_results.extend(results)
-                
-                # Remove duplicates and sort
-                seen_ids = set()
-                unique_results = []
-                for result in all_results:
-                    if result['id'] not in seen_ids:
-                        seen_ids.add(result['id'])
-                        unique_results.append(result)
-                
-                unique_results.sort(key=lambda x: x['distance'])
-                return unique_results[:n_results]
-                
-            except Exception as e:
-                self.logger.error(f"Objectives search failed: {e}")
-                # Fallback to regular semantic search
-                return self.semantic_search(query, n_results, distance_threshold=0.8)
+                    return objectives_results
+            
+            # Use enhanced section search for other sections
+            section_results = self.enhanced_section_search(section_numbers[0], query, n_results)
+            if section_results:
+                return section_results
+            
+            # Fallback to hybrid search
+            return self.hybrid_search(query, n_results)
         
         elif section_numbers:
-            self.logger.info(f"Found section numbers: {section_numbers}")
+            self.logger.info(f"General section query detected for sections: {section_numbers}")
             
-            # Use enhanced section search for any section query (generalized approach)
-            self.logger.info(f"Using enhanced section search for {section_numbers[0]}")
-            enhanced_results = self.enhanced_section_search(section_numbers[0], query, n_results)
-            if enhanced_results:
-                return enhanced_results
+            # Use enhanced section search
+            section_results = self.enhanced_section_search(section_numbers[0], query, n_results)
+            if section_results:
+                return section_results
             
-            # Fallback to exact search if enhanced search fails
-            exact_results = self.exact_text_search(query, section_numbers)
-            if exact_results:
-                self.logger.info(f"Found {len(exact_results)} exact matches")
-                return exact_results[:n_results]
-            
-            # Final fallback to hybrid search
-            self.logger.info("No exact matches, trying hybrid search")
-            return self.hybrid_search(query, n_results, semantic_weight=0.3, exact_weight=0.7)
-        
-        elif is_list:
-            self.logger.info("List query detected without section numbers")
-            
-            # Use expanded queries for list search
-            expanded_queries = self.expand_list_query(query, [])
-            all_results = []
-            
-            for expanded_query in expanded_queries[:3]:  # Limit to first 3 expanded queries
-                results = self.semantic_search(expanded_query, n_results=5, distance_threshold=0.9)
-                all_results.extend(results)
-            
-            # Remove duplicates and sort
-            seen_ids = set()
-            unique_results = []
-            for result in all_results:
-                if result['id'] not in seen_ids:
-                    seen_ids.add(result['id'])
-                    unique_results.append(result)
-            
-            unique_results.sort(key=lambda x: x['distance'])
-            return unique_results[:n_results]
+            # Fallback to hybrid search
+            return self.hybrid_search(query, n_results)
         
         else:
-            # No section numbers, use semantic search with fallback
-            self.logger.info("No section numbers found, using semantic search")
-            semantic_results = self.semantic_search(query, n_results, distance_threshold=0.8)
-            
-            if semantic_results:
-                return semantic_results
-            
-            # Fallback to more permissive search
-            self.logger.info("No semantic results, trying more permissive search")
-            return self.semantic_search(query, n_results, distance_threshold=0.9)
+            # General query - use hybrid search
+            self.logger.info("General query detected - using hybrid search")
+            return self.hybrid_search(query, n_results)
     
-    def enhanced_section_search(self, section_number: str, query: str, n_results: int = 10) -> List[Dict]:
+    def enhanced_section_search(self, section_number: str, query: str, n_results: int = 5) -> List[Dict]:
         """
-        Enhanced search for section-specific queries that reconstructs complete sections
+        Enhanced search for any section that prioritizes complete section content
+        Works for all sections, not just objectives
+        """
+        try:
+            # Get all documents
+            all_results = self.collection.get()
+            
+            # Find chunks containing this section
+            section_chunks = []
+            other_chunks = []
+            
+            for chunk_id, content, metadata in zip(all_results['ids'], all_results['documents'], all_results['metadatas']):
+                # Check if this chunk contains the section number
+                if section_number in content:
+                    # Determine the type of content in this chunk
+                    has_section_header = bool(re.search(rf'##\s*{re.escape(section_number)}\s+', content, re.IGNORECASE))
+                    has_lists = any(marker in content for marker in ['(i)', '(ii)', '(iii)', '(iv)', '(v)', '(vi)', '(vii)', '(viii)', '(ix)', '(a)', '(b)', '(c)', '(d)', '(e)', '(f)', '1.', '2.', '3.', '4.', '5.'])
+                    has_tables = '|' in content or 'table' in content.lower()
+                    has_complete_content = len(content) > 500  # Substantial content
+                    
+                    # Score this chunk based on content quality
+                    content_score = 0.0
+                    if has_section_header:
+                        content_score += 0.4
+                    if has_lists:
+                        content_score += 0.3
+                    if has_tables:
+                        content_score += 0.2
+                    if has_complete_content:
+                        content_score += 0.1
+                    
+                    # Boost score for chunks with substantial content
+                    if len(content) > 1000:
+                        content_score += 0.2
+                    
+                    section_chunks.append({
+                        'id': chunk_id,
+                        'text': content,
+                        'metadata': metadata,
+                        'distance': 1.0 - content_score,  # Lower distance = better
+                        'search_type': 'enhanced_section',
+                        'content_score': content_score,
+                        'has_header': has_section_header,
+                        'has_lists': has_lists,
+                        'has_tables': has_tables,
+                        'content_length': len(content)
+                    })
+                elif any(keyword in query.lower() for keyword in ['section', 'clause', 'schedule']):
+                    # For section-related queries, include other relevant chunks
+                    other_chunks.append({
+                        'id': chunk_id,
+                        'text': content,
+                        'metadata': metadata,
+                        'distance': 0.5,  # Medium priority
+                        'search_type': 'other_section_content',
+                        'content_score': 0.0
+                    })
+            
+            # Sort section chunks by content score (highest first)
+            section_chunks.sort(key=lambda x: x['content_score'], reverse=True)
+            
+            # Combine results with section chunks first
+            combined_results = section_chunks + other_chunks
+            
+            # If we don't have enough results, add semantic search results
+            if len(combined_results) < n_results:
+                try:
+                    semantic_results = self.semantic_search(query, n_results - len(combined_results))
+                    for result in semantic_results:
+                        # Skip if already in our results
+                        if not any(r['id'] == result['id'] for r in combined_results):
+                            combined_results.append(result)
+                except Exception as e:
+                    self.logger.error(f"Semantic search fallback failed: {e}")
+            
+            return combined_results[:n_results]
+            
+        except Exception as e:
+            self.logger.error(f"Enhanced section search failed: {e}")
+            # Fallback to regular search
+            return self.semantic_search(query, n_results)
+    
+    def is_section_query(self, query: str) -> bool:
+        """
+        Detect if the query is asking about a specific section
         
         Args:
-            section_number: Section number (e.g., "3.2")
-            query: Original query
-            n_results: Number of results to return
+            query: Search query
             
         Returns:
-            List of search results with reconstructed section content
+            True if query is about a specific section
         """
-        print(f"Enhanced section search for section {section_number}")
+        section_keywords = [
+            'section', 'clause', 'schedule', 'article', 'part',
+            'chapter', 'subsection', 'paragraph'
+        ]
         
-        # Find all chunks related to this section
-        section_chunks = self.find_all_section_chunks(section_number)
+        # Check for section number patterns
+        section_patterns = [
+            r'\b\d+\.\d+\b',  # 3.2, 11.4, etc.
+            r'\b\d+\b',       # 3, 11, etc.
+            r'section\s+\d+',
+            r'clause\s+\d+',
+            r'schedule\s+\d+'
+        ]
         
-        if not section_chunks:
-            print(f"Warning: No chunks found for section {section_number}")
-            return self.semantic_search(query, n_results)
+        query_lower = query.lower()
         
-        # Reconstruct the complete section
-        reconstructed_content = self.reconstruct_section_content(section_number, section_chunks, query)
+        # Check for section keywords
+        has_section_keyword = any(keyword in query_lower for keyword in section_keywords)
         
-        # Return the reconstructed content as the primary result
-        primary_result = {
-            'id': f'reconstructed_section_{section_number}',
-            'text': reconstructed_content,
-            'distance': 0.0,
-            'search_type': 'reconstructed_section',
-            'combined_score': 1.0,
-            'source_chunks': len(section_chunks)
-        }
+        # Check for section number patterns
+        has_section_number = any(re.search(pattern, query, re.IGNORECASE) for pattern in section_patterns)
         
-        # Also include individual chunks as additional results
-        additional_results = []
-        for chunk in section_chunks[:n_results-1]:
-            additional_results.append({
-                'id': chunk.get('id', 'unknown'),
-                'text': chunk['content'],
-                'distance': chunk.get('distance', 0.5),
-                'search_type': 'section_chunk',
-                'combined_score': chunk.get('relevance_score', 0.5)
-            })
+        return has_section_keyword or has_section_number
+    
+    def extract_section_number_from_query(self, query: str) -> Optional[str]:
+        """
+        Extract section number from query
         
-        return [primary_result] + additional_results
+        Args:
+            query: Search query
+            
+        Returns:
+            Section number if found, None otherwise
+        """
+        # Look for section number patterns
+        section_patterns = [
+            r'section\s+(\d+(?:\.\d+)?)',  # Section 3.2
+            r'clause\s+(\d+(?:\.\d+)?)',   # Clause 3.2
+            r'schedule\s+(\d+(?:\.\d+)?)', # Schedule 1
+            r'(\d+\.\d+)',                 # 3.2
+            r'(\d+)'                       # 3
+        ]
+        
+        for pattern in section_patterns:
+            match = re.search(pattern, query, re.IGNORECASE)
+            if match:
+                return match.group(1)
+        
+        return None
     
     def find_all_section_chunks(self, section_number: str) -> List[Dict]:
         """
@@ -967,6 +1047,69 @@ class HybridSearch:
         except Exception as e:
             print(f"Error finding section {section_number} with nesting: {e}")
             return []
+
+    def enhanced_objectives_search(self, query: str, n_results: int = 5) -> List[Dict]:
+        """
+        Enhanced search specifically for objectives queries
+        Prioritizes Section 3.2 objectives and ensures complete list retrieval
+        """
+        try:
+            # Check if this is an objectives query
+            objectives_keywords = ['objectives', 'objective', 'contract objectives', 'agreement objectives']
+            is_objectives_query = any(keyword in query.lower() for keyword in objectives_keywords)
+            
+            if not is_objectives_query:
+                # Use regular search for non-objectives queries
+                return self.semantic_search(query, n_results)
+            
+            # For objectives queries, prioritize Section 3.2
+            all_results = self.collection.get()
+            
+            # Find Section 3.2 objectives chunk
+            section_3_2_chunks = []
+            other_objectives_chunks = []
+            
+            for chunk_id, content, metadata in zip(all_results['ids'], all_results['documents'], all_results['metadatas']):
+                if 'objectives' in content.lower():
+                    if '3.2' in content and any(marker in content for marker in ['(i)', '(ii)', '(iii)', '(iv)', '(v)', '(vi)', '(vii)', '(viii)', '(ix)']):
+                        # This is the main Section 3.2 objectives chunk
+                        section_3_2_chunks.append({
+                            'id': chunk_id,
+                            'text': content,
+                            'distance': 0.0,  # Highest priority
+                            'search_type': 'section_3_2_objectives',
+                            'rank': 1
+                        })
+                    elif 'objectives' in content.lower():
+                        # Other objectives-related chunks
+                        other_objectives_chunks.append({
+                            'id': chunk_id,
+                            'text': content,
+                            'distance': 0.3,  # Medium priority
+                            'search_type': 'other_objectives',
+                            'rank': len(other_objectives_chunks) + 2
+                        })
+            
+            # Combine results with Section 3.2 first
+            combined_results = section_3_2_chunks + other_objectives_chunks
+            
+            # If we don't have enough results, add semantic search results
+            if len(combined_results) < n_results:
+                try:
+                    semantic_results = self.semantic_search(query, n_results - len(combined_results))
+                    for result in semantic_results:
+                        # Skip if already in our results
+                        if not any(r['id'] == result['id'] for r in combined_results):
+                            combined_results.append(result)
+                except Exception as e:
+                    self.logger.error(f"Semantic search fallback failed: {e}")
+            
+            return combined_results[:n_results]
+            
+        except Exception as e:
+            self.logger.error(f"Enhanced objectives search failed: {e}")
+            # Fallback to regular search
+            return self.semantic_search(query, n_results)
 
 # Example usage and testing
 if __name__ == "__main__":
