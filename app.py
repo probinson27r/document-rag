@@ -581,14 +581,39 @@ def ingest_document_with_improved_chunking(file_path: str, processing_id: str = 
             extraction_config = session.get('extraction_config', {})
             chunking_method = extraction_config.get('chunking', {}).get('method', 'semantic')
             enable_ocr = extraction_config.get('ocr', {}).get('enabled', False)
+            extraction_method = extraction_config.get('extraction_method', 'auto')
+            logger.info(f"[CONFIG] Using chunking method: {chunking_method} (from session config)")
+            logger.info(f"[CONFIG] Using extraction method: {extraction_method}")
+            logger.info(f"[CONFIG] Extraction config: {extraction_config}")
         except RuntimeError:
             # No request context, use default
             chunking_method = 'semantic'
             enable_ocr = False
+            extraction_method = 'auto'
+            logger.info(f"[CONFIG] No session context, using defaults: chunking={chunking_method}, extraction={extraction_method}")
+        
+        # Determine GPT-4 usage based on chunking method and extraction method
+        # When using LangExtract, disable GPT-4 extraction to use Google GenAI instead
+        use_gpt4_enhancement = (
+            extraction_method != 'traditional' and 
+            chunking_method != 'langextract'  # Disable GPT-4 when using LangExtract
+        )
+        use_gpt4_chunking = (
+            extraction_method != 'traditional' and 
+            chunking_method == 'gpt4'  # Only enable GPT-4 chunking when explicitly selected
+        )
+        
+        logger.info(f"[CONFIG] GPT-4 enhancement: {use_gpt4_enhancement}")
+        logger.info(f"[CONFIG] GPT-4 chunking: {use_gpt4_chunking}")
         
         # Initialize RAG system with error handling for ChromaDB conflicts
         try:
-            rag = DocumentRAG(chunking_method=chunking_method, enable_ocr=enable_ocr)
+            rag = DocumentRAG(
+                chunking_method=chunking_method, 
+                enable_ocr=enable_ocr,
+                use_gpt4_enhancement=use_gpt4_enhancement,
+                use_gpt4_chunking=use_gpt4_chunking
+            )
         except Exception as chroma_error:
             if "already exists" in str(chroma_error):
                 # If there's a ChromaDB instance conflict, try to use the existing one
@@ -596,7 +621,12 @@ def ingest_document_with_improved_chunking(file_path: str, processing_id: str = 
                 # Wait a moment and try again
                 import time
                 time.sleep(1)
-                rag = DocumentRAG(chunking_method=chunking_method, enable_ocr=enable_ocr)
+                rag = DocumentRAG(
+                    chunking_method=chunking_method, 
+                    enable_ocr=enable_ocr,
+                    use_gpt4_enhancement=use_gpt4_enhancement,
+                    use_gpt4_chunking=use_gpt4_chunking
+                )
             else:
                 raise chroma_error
         

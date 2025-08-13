@@ -68,7 +68,8 @@ class GPT4Extractor:
         }
         
         # Reserve tokens for system prompt and response
-        self.reserved_tokens = 2000
+        # Increased margin to prevent context overflow
+        self.reserved_tokens = 8000
         
         # Initialize OpenAI client
         if openai_api_key:
@@ -118,9 +119,19 @@ class GPT4Extractor:
         
         # Count tokens in prompt
         prompt_tokens = self.count_tokens(prompt)
-        available_tokens = max_text_tokens - prompt_tokens
         
-        logger.info(f"Model: {model}, Context limit: {context_limit}, Available for text: {available_tokens}")
+        # Add extra safety margin for prompt variations and response tokens
+        safety_margin = 4000
+        available_tokens = max_text_tokens - prompt_tokens - safety_margin
+        
+        # Ensure we don't go below a reasonable minimum
+        if available_tokens < 10000:
+            available_tokens = min(10000, context_limit // 2)
+            logger.warning(f"Very limited token space available. Using conservative limit: {available_tokens}")
+        
+        logger.info(f"Model: {model}, Context limit: {context_limit}, Reserved: {self.reserved_tokens}")
+        logger.info(f"Prompt tokens: {prompt_tokens}, Safety margin: {safety_margin}")
+        logger.info(f"Available for text: {available_tokens}")
         
         # Count tokens in full text
         total_tokens = self.count_tokens(text)
@@ -188,12 +199,43 @@ class GPT4Extractor:
         if current_chunk.strip():
             chunks.append(current_chunk.strip())
         
-        logger.info(f"Split text into {len(chunks)} chunks")
+        # Validate all chunks fit within limits
+        validated_chunks = []
         for i, chunk in enumerate(chunks):
             tokens = self.count_tokens(chunk)
-            logger.info(f"Chunk {i+1}: {tokens} tokens")
+            
+            if tokens > available_tokens:
+                logger.warning(f"Chunk {i+1} still too large ({tokens} tokens), attempting further reduction")
+                # Force split oversized chunk
+                words = chunk.split()
+                reduced_chunk = ""
+                for word in words:
+                    test_chunk = reduced_chunk + " " + word if reduced_chunk else word
+                    if self.count_tokens(test_chunk) <= available_tokens:
+                        reduced_chunk = test_chunk
+                    else:
+                        if reduced_chunk:
+                            validated_chunks.append(reduced_chunk)
+                            reduced_chunk = word
+                        else:
+                            # Single word is too large, skip it
+                            logger.error(f"Single word '{word}' exceeds token limit, skipping")
+                            break
+                if reduced_chunk:
+                    validated_chunks.append(reduced_chunk)
+            else:
+                validated_chunks.append(chunk)
         
-        return chunks
+        logger.info(f"Split text into {len(validated_chunks)} validated chunks")
+        for i, chunk in enumerate(validated_chunks):
+            tokens = self.count_tokens(chunk)
+            logger.info(f"Chunk {i+1}: {tokens} tokens")
+            
+            # Final safety check
+            if tokens > available_tokens:
+                logger.error(f"ERROR: Chunk {i+1} still exceeds limit ({tokens} > {available_tokens})")
+        
+        return validated_chunks
     
     def extract_with_gpt4(self, 
                          text: str, 

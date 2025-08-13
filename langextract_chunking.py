@@ -225,17 +225,36 @@ class LangExtractChunker:
             from langchain_google_genai import GoogleGenerativeAI
             import os
             
-            # Load environment variables and get API key
+            # Try to get API key from AWS Secrets Manager first, then fallback to environment
+            api_key = None
             try:
-                from dotenv import load_dotenv
-                load_dotenv('.env.local')
-            except ImportError:
-                pass  # dotenv not available
+                from aws_secrets import get_google_api_key
+                api_key = get_google_api_key()
+                if api_key:
+                    logger.info("Google API key retrieved from AWS Secrets Manager")
+                else:
+                    logger.warning("Google API key not found in AWS Secrets Manager, trying environment variables")
+            except Exception as aws_error:
+                logger.warning(f"Failed to retrieve Google API key from AWS Secrets Manager: {aws_error}")
+                logger.info("Falling back to environment variables")
             
-            api_key = os.getenv('GOOGLE_API_KEY')
+            # Fallback to environment variables if AWS Secrets Manager fails
             if not api_key:
-                logger.error("GOOGLE_API_KEY not found in environment variables")
-                logger.error("Make sure GOOGLE_API_KEY is set in .env.local or environment")
+                try:
+                    from dotenv import load_dotenv
+                    load_dotenv('.env.local')
+                except ImportError:
+                    pass  # dotenv not available
+                
+                api_key = os.getenv('GOOGLE_API_KEY')
+                if api_key:
+                    logger.info("Google API key retrieved from environment variables")
+            
+            if not api_key:
+                logger.error("Google API key not found in AWS Secrets Manager or environment variables")
+                logger.error("Please either:")
+                logger.error("1. Store the key in AWS Secrets Manager as 'legal-rag/google-api-key'")
+                logger.error("2. Set GOOGLE_API_KEY in .env.local or environment variables")
                 raise ValueError("Google API key is required for LangExtract API mode")
             
             # Initialize Google Generative AI

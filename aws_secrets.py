@@ -108,6 +108,15 @@ def get_openai_api_key() -> Optional[str]:
     """
     return get_secret('legal-rag/openai-api-key')
 
+def get_google_api_key() -> Optional[str]:
+    """
+    Retrieve the Google API key from AWS Secrets Manager
+    
+    Returns:
+        The Google API key as a string, or None if retrieval fails
+    """
+    return get_secret('legal-rag/google-api-key')
+
 def get_secret_key() -> Optional[str]:
     """
     Retrieve the Flask secret key from AWS Secrets Manager

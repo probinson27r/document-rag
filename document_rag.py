@@ -604,7 +604,9 @@ class DocumentRAG:
                  chunk_overlap: int = 128,  # 128 character overlap
                  chroma_db_path: str = "./chroma_db",
                  chunking_method: str = "semantic",
-                 enable_ocr: bool = False):
+                 enable_ocr: bool = False,
+                 use_gpt4_enhancement: bool = True,
+                 use_gpt4_chunking: bool = True):
         
         self.model_name = model_name
         self.chunk_size = chunk_size
@@ -613,7 +615,11 @@ class DocumentRAG:
         self.enable_ocr = enable_ocr
         
         # Initialize components
-        self.document_processor = DocumentProcessor(enable_ocr=enable_ocr)
+        self.document_processor = DocumentProcessor(
+            enable_ocr=enable_ocr,
+            use_gpt4_enhancement=use_gpt4_enhancement,
+            use_gpt4_chunking=use_gpt4_chunking
+        )
         self.ollama_client = OllamaClient()
         # Use SentenceTransformer for embeddings
         from sentence_transformers import SentenceTransformer
