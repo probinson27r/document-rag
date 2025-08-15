@@ -26,3 +26,7 @@ sentence-transformers
 tiktoken
 unstructured
 unstructured_inference
+# OCR Dependencies
+pi-heif>=1.0.0
+fpdf2>=2.7.0
+Pillow>=10.0.0

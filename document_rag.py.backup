@@ -50,60 +50,6 @@ except ImportError:
 
 import traceback
 
-
-def extract_text_with_ocr_fallback(file_path: str) -> str:
-    """
-    Extract text from PDF with OCR fallback when unstructured.io fails
-    """
-    try:
-        # Try unstructured.io first
-        from unstructured.partition.pdf import partition_pdf
-        print("[unstructured] Attempting extraction with unstructured.io...")
-        elements = partition_pdf(file_path)
-        text = "\n".join([getattr(el, 'text', '').strip() for el in elements if getattr(el, 'text', '').strip()])
-        if text.strip():
-            print("[unstructured] Extraction successful")
-            return text
-    except ImportError as e:
-        print(f"[unstructured] Import error: {e}")
-    except Exception as e:
-        print(f"[unstructured] Extraction failed: {e}")
-    
-    try:
-        # Fallback to pdfplumber
-        import pdfplumber
-        print("[pdfplumber] Attempting extraction with pdfplumber...")
-        text = ""
-        with pdfplumber.open(file_path) as pdf:
-            for page in pdf.pages:
-                page_text = page.extract_text()
-                if page_text:
-                    text += page_text + "\n"
-        if text.strip():
-            print("[pdfplumber] Extraction successful")
-            return text
-    except Exception as e:
-        print(f"[pdfplumber] Extraction failed: {e}")
-    
-    try:
-        # Final fallback to PyMuPDF
-        import fitz
-        print("[PyMuPDF] Attempting extraction with PyMuPDF...")
-        doc = fitz.open(file_path)
-        text = ""
-        for page in doc:
-            text += page.get_text() + "\n"
-        doc.close()
-        if text.strip():
-            print("[PyMuPDF] Extraction successful")
-            return text
-    except Exception as e:
-        print(f"[PyMuPDF] Extraction failed: {e}")
-    
-    print("[ERROR] All extraction methods failed")
-    return ""
-
-
 class DocumentProcessor:
     """Handles document ingestion and text extraction"""
     
@@ -201,43 +147,21 @@ class DocumentProcessor:
                 import pytesseract
                 from fpdf import FPDF
                 import requests
-                # Try to use system fonts first, fallback to downloaded font
-                FONT_PATH = "fonts/DejaVuSans.ttf"
-                
-                # Create fonts directory if it doesn't exist
-                fonts_dir = "fonts"
-                os.makedirs(fonts_dir, exist_ok=True)
-                
-                # Download font if not present
+                FONT_PATH = "DejaVuSans.ttf"
+                # Download DejaVuSans.ttf if not present
                 if not os.path.exists(FONT_PATH):
-                    try:
-                        print("[fpdf2] Downloading DejaVuSans.ttf font...")
-                        url = "https://github.com/dejavu-fonts/dejavu-fonts/raw/master/ttf/DejaVuSans.ttf"
-                        r = requests.get(url, timeout=30)
-                        r.raise_for_status()
-                        with open(FONT_PATH, "wb") as f:
-                            f.write(r.content)
-                        print("[fpdf2] Font downloaded successfully.")
-                    except Exception as e:
-                        print(f"[fpdf2] Failed to download font: {e}")
-                        print("[fpdf2] Will use system fonts instead.")
-                        FONT_PATH = None
-                
+                    print("[fpdf2] Downloading DejaVuSans.ttf font...")
+                    url = "https://github.com/dejavu-fonts/dejavu-fonts/raw/master/ttf/DejaVuSans.ttf"
+                    r = requests.get(url)
+                    with open(FONT_PATH, "wb") as f:
+                        f.write(r.content)
+                    print("[fpdf2] Font downloaded.")
                 from fpdf import FPDF
                 class UnicodePDF(FPDF):
                     def __init__(self):
                         super().__init__()
-                        try:
-                            if FONT_PATH and os.path.exists(FONT_PATH):
-                                self.add_font("DejaVu", "", FONT_PATH, uni=True)
-                                self.set_font("DejaVu", size=12)
-                            else:
-                                # Fallback to system fonts
-                                self.set_font("Arial", size=12)
-                        except Exception as e:
-                            print(f"[fpdf2] Font loading failed: {e}")
-                            # Use default font
-                            self.set_font("Arial", size=12)
+                        self.add_font("DejaVu", "", FONT_PATH, uni=True)
+                        self.set_font("DejaVu", size=12)
                 print("[OCR] Converting PDF pages to images...")
                 images = convert_from_path(file_path)
                 print(f"[OCR] {len(images)} pages converted. Running OCR...")
