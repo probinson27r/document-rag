@@ -322,13 +322,12 @@ Extract all sections, lists, and key information while preserving the document's
                 response_text = response if isinstance(response, str) else str(response)
                 logger.info(f"Received response from Google GenAI: {len(response_text)} characters")
                 
-                # Try to extract JSON from the response
-                json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
-                if json_match:
-                    result = json.loads(json_match.group())
-                else:
-                    # If no JSON found, try to parse the entire response
-                    result = json.loads(response_text)
+                # Try multiple approaches to extract valid JSON
+                result = self._extract_json_from_response(response_text)
+                
+                if not result:
+                    logger.warning("Could not extract valid JSON from response, using fallback")
+                    return self._fallback_chunking(text)
                 
                 # Merge any split lists to preserve complete objective lists
                 components = result.get('extracted_components', [])
@@ -371,10 +370,12 @@ Extract all sections, lists, and key information while preserving the document's
                 
             except json.JSONDecodeError as e:
                 logger.error(f"Failed to parse LangExtract response as JSON: {e}")
+                logger.error(f"Response preview: {response_text[:500]}...")
                 return self._fallback_chunking(text)
                 
         except Exception as e:
             logger.error(f"LangExtract API error: {e}")
+            logger.error(f"Full error details: {str(e)}")
             return self._fallback_chunking(text)
     
     def _fallback_chunking(self, text: str) -> List[LangExtractChunk]:
@@ -987,6 +988,104 @@ Extract all sections, lists, and key information while preserving the document's
             chunks.append(chunk)
         
         return chunks
+    
+    def _extract_json_from_response(self, response_text: str) -> Optional[Dict[str, Any]]:
+        """
+        Extract valid JSON from Google GenAI response using multiple strategies
+        
+        Args:
+            response_text: Raw response from Google GenAI
+            
+        Returns:
+            Parsed JSON object or None if extraction fails
+        """
+        import json
+        import re
+        
+        # Strategy 1: Try to find JSON object with regex
+        try:
+            json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
+            if json_match:
+                json_str = json_match.group()
+                logger.info(f"Found JSON object with regex: {len(json_str)} characters")
+                return json.loads(json_str)
+        except Exception as e:
+            logger.debug(f"Regex JSON extraction failed: {e}")
+        
+        # Strategy 2: Try to find JSON array
+        try:
+            json_match = re.search(r'\[.*\]', response_text, re.DOTALL)
+            if json_match:
+                json_str = json_match.group()
+                logger.info(f"Found JSON array with regex: {len(json_str)} characters")
+                return {"extracted_components": json.loads(json_str)}
+        except Exception as e:
+            logger.debug(f"Regex JSON array extraction failed: {e}")
+        
+        # Strategy 3: Try to parse the entire response as JSON
+        try:
+            logger.info("Attempting to parse entire response as JSON")
+            return json.loads(response_text)
+        except Exception as e:
+            logger.debug(f"Full response JSON parsing failed: {e}")
+        
+        # Strategy 4: Try to clean and fix common JSON issues
+        try:
+            cleaned_text = self._clean_json_response(response_text)
+            logger.info("Attempting to parse cleaned response as JSON")
+            return json.loads(cleaned_text)
+        except Exception as e:
+            logger.debug(f"Cleaned JSON parsing failed: {e}")
+        
+        # Strategy 5: Try to extract JSON from markdown code blocks
+        try:
+            code_block_match = re.search(r'```(?:json)?\s*\n(.*?)\n```', response_text, re.DOTALL)
+            if code_block_match:
+                json_str = code_block_match.group(1).strip()
+                logger.info(f"Found JSON in code block: {len(json_str)} characters")
+                return json.loads(json_str)
+        except Exception as e:
+            logger.debug(f"Code block JSON extraction failed: {e}")
+        
+        logger.error("All JSON extraction strategies failed")
+        return None
+    
+    def _clean_json_response(self, response_text: str) -> str:
+        """
+        Clean response text to fix common JSON formatting issues
+        
+        Args:
+            response_text: Raw response text
+            
+        Returns:
+            Cleaned response text
+        """
+        import re
+        
+        # Remove any text before the first {
+        start_idx = response_text.find('{')
+        if start_idx != -1:
+            response_text = response_text[start_idx:]
+        
+        # Remove any text after the last }
+        end_idx = response_text.rfind('}')
+        if end_idx != -1:
+            response_text = response_text[:end_idx + 1]
+        
+        # Fix common JSON issues
+        # Replace single quotes with double quotes
+        response_text = re.sub(r"'([^']*)'", r'"\1"', response_text)
+        
+        # Fix trailing commas
+        response_text = re.sub(r',(\s*[}\]])', r'\1', response_text)
+        
+        # Fix missing quotes around keys
+        response_text = re.sub(r'(\s*)(\w+)(\s*):', r'\1"\2"\3:', response_text)
+        
+        # Remove any non-printable characters
+        response_text = ''.join(char for char in response_text if char.isprintable() or char in '\n\t')
+        
+        return response_text
     
     def _merge_split_lists(self, components: List[Dict]) -> List[Dict]:
         """
