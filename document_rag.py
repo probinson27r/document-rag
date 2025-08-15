@@ -223,38 +223,18 @@ class DocumentProcessor:
                         print("[fpdf2] Will use system fonts instead.")
                         FONT_PATH = None
                 
-                from fpdf import FPDF
-                class UnicodePDF(FPDF):
-                    def __init__(self):
-                        super().__init__()
-                        try:
-                            if FONT_PATH and os.path.exists(FONT_PATH):
-                                self.add_font("DejaVu", "", FONT_PATH, uni=True)
-                                self.set_font("DejaVu", size=12)
-                            else:
-                                # Fallback to system fonts
-                                self.set_font("Arial", size=12)
-                        except Exception as e:
-                            print(f"[fpdf2] Font loading failed: {e}")
-                            # Use default font
-                            self.set_font("Arial", size=12)
+                # OCR text extraction completed, proceeding to unstructured.io
                 print("[OCR] Converting PDF pages to images...")
                 images = convert_from_path(file_path)
                 print(f"[OCR] {len(images)} pages converted. Running OCR...")
                 ocr_texts = [pytesseract.image_to_string(img) for img in images]
-                print("[OCR] OCR extraction complete. Rebuilding PDF from OCR text with Unicode support...")
-                ocr_temp_pdf = file_path + ".ocr.pdf"
-                pdf = UnicodePDF()
-                pdf.set_auto_page_break(auto=True, margin=15)
-                for page_text in ocr_texts:
-                    pdf.add_page()
-                    for line in page_text.splitlines():
-                        pdf.cell(0, 10, txt=line, ln=1)
-                pdf.output(ocr_temp_pdf)
-                print(f"[OCR] OCR-based PDF created: {ocr_temp_pdf}")
+                print("[OCR] OCR extraction complete. Skipping PDF rebuilding due to Unicode issues...")
+                print("[OCR] Proceeding directly to unstructured.io extraction...")
+                ocr_temp_pdf = None
                 sys.stdout.flush()
             except Exception as e:
-                print(f"[OCR] Extraction failed: {e}")
+                print(f"[OCR] OCR PDF rebuilding failed: {e}")
+                print("[OCR] Falling back to direct unstructured.io extraction...")
                 traceback.print_exc()
                 sys.stdout.flush()
                 ocr_temp_pdf = None
