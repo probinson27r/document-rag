@@ -30,3 +30,4 @@ unstructured_inference
 pi-heif>=1.0.0
 fpdf2>=2.7.0
 Pillow>=10.0.0
+unstructured-pytesseract>=0.3.15
