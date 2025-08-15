@@ -85,50 +85,9 @@ def clean_chromadb_titles():
         print(f"❌ Error cleaning titles: {e}")
         return None
 
-def test_clean_sources():
-    """Test the source generation with cleaned titles"""
-    
-    print(f"\n🧪 Testing Clean Source Generation:")
-    print("-" * 50)
-    
-    try:
-        # Connect to ChromaDB
-        client = chromadb.PersistentClient(path='./chroma_db')
-        collection = client.get_collection('documents')
-        
-        # Get a few chunks to test
-        results = collection.get(limit=5)
-        
-        print(f"Testing source generation for {len(results['ids'])} chunks:")
-        print()
-        
-        for i, (chunk_id, content, metadata) in enumerate(zip(results['ids'], results['documents'], results['metadatas'])):
-            filename = metadata.get('filename', 'Unknown Document')
-            section_number = metadata.get('section_number', 'Unknown')
-            section_title = metadata.get('section_title', 'Unknown')
-            
-            section_info = f"{section_number} - {section_title}"
-            source_info = f"{filename}: {section_info}"
-            
-            print(f"Chunk {i+1}:")
-            print(f"  Content preview: {content[:100]}...")
-            print(f"  Section number: '{section_number}'")
-            print(f"  Section title: '{section_title}'")
-            print(f"  Generated source: '{source_info}'")
-            print()
-        
-        return True
-        
-    except Exception as e:
-        print(f"❌ Error testing clean sources: {e}")
-        return False
-
 if __name__ == "__main__":
     # Clean the titles
     clean_result = clean_chromadb_titles()
-    
-    # Test clean source generation
-    test_success = test_clean_sources()
     
     print(f"\n🎯 Final Summary:")
     print("=" * 50)
@@ -136,9 +95,3 @@ if __name__ == "__main__":
         print(f"✅ Title cleaning completed:")
         print(f"  - Updated {clean_result['updated_chunks']} chunks with cleaned titles")
         print(f"  - Total chunks processed: {clean_result['total_chunks']}")
-    
-    if test_success:
-        print(f"✅ Clean source generation test completed successfully!")
-        print(f"  Sources now show clean, readable section information")
-    else:
-        print(f"❌ Clean source generation test failed")

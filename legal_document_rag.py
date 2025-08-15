@@ -261,13 +261,155 @@ def is_footer_content(text: str) -> bool:
     
     return False
 
+def has_table_content(text: str) -> bool:
+    """
+    Check if text contains table-like content
+    
+    Args:
+        text: Text to check
+        
+    Returns:
+        True if text contains table indicators
+    """
+    # Check for table indicators
+    table_indicators = [
+        'service level',  # Service level content
+        'kpi',  # Key performance indicators
+        'metric',  # Metrics
+        'requirement',  # Requirements
+        'bundle',  # Service bundle references
+        'availability',  # Availability metrics
+        'uptime',  # Uptime metrics
+        'performance',  # Performance metrics
+        'report',  # Reporting requirements
+        'frequency',  # Measurement frequency
+        'mechanism',  # Measurement mechanism
+        'ref.',  # Reference numbers
+        '%',  # Percentage metrics
+        'hours',  # Time-based metrics
+        'days'  # Time-based metrics
+    ]
+    return any(indicator in text.lower() for indicator in table_indicators)
+
+def is_incomplete_table(text: str) -> bool:
+    """
+    Check if table content appears to be incomplete
+    
+    Args:
+        text: Text to check
+        
+    Returns:
+        True if table appears incomplete
+    """
+    lines = text.split('\n')
+    table_lines = [line for line in lines if has_table_content(line)]
+    
+    # If we have table content but it seems incomplete
+    if table_lines:
+        # Check if it ends with a complete row
+        last_table_line = table_lines[-1]
+        if not looks_like_complete_row(last_table_line):
+            return True
+        
+        # Check if we have service level headers but incomplete data
+        has_service_level_headers = any('service level' in line.lower() for line in lines)
+        has_complete_data = any('%' in line and ('report' in line.lower() or 'monthly' in line.lower()) for line in lines)
+        
+        if has_service_level_headers and not has_complete_data:
+            return True
+    
+    return False
+
+def looks_like_complete_row(line: str) -> bool:
+    """
+    Check if a line looks like a complete table row
+    
+    Args:
+        line: Line to check
+        
+    Returns:
+        True if line appears to be a complete table row
+    """
+    line = line.strip()
+    if not line:
+        return False
+    
+    # Check for complete service level row patterns
+    complete_patterns = [
+        r'.*%\s+\d+\.?\d*%\s+.*report.*',  # Percentage + Report
+        r'.*%\s+\d+\.?\d*%\s+.*monthly.*',  # Percentage + Monthly
+        r'.*hours.*\d+.*',  # Hours + number
+        r'.*days.*\d+.*',  # Days + number
+        r'.*availability.*\d+\.?\d*%.*',  # Availability percentage
+        r'.*uptime.*\d+\.?\d*%.*',  # Uptime percentage
+    ]
+    
+    for pattern in complete_patterns:
+        if re.search(pattern, line, re.IGNORECASE):
+            return True
+    
+    return False
+
+def is_table_continuation(current_chunk: str, next_paragraph: str) -> bool:
+    """
+    Check if next paragraph continues the table structure
+    
+    Args:
+        current_chunk: Current chunk content
+        next_paragraph: Next paragraph to check
+        
+    Returns:
+        True if next paragraph continues the table
+    """
+    current_lines = current_chunk.split('\n')
+    next_lines = next_paragraph.split('\n')
+    
+    # Look for table structure patterns
+    current_has_structure = any(has_table_content(line) for line in current_lines)
+    next_has_structure = any(has_table_content(line) for line in next_lines)
+    
+    # Check if both have table content
+    if current_has_structure and next_has_structure:
+        return True
+    
+    # Check for service level continuation patterns
+    current_has_service_level = any('service level' in line.lower() for line in current_lines)
+    next_has_service_level = any('service level' in line.lower() for line in next_lines)
+    
+    if current_has_service_level and next_has_service_level:
+        return True
+    
+    # Check for metric continuation patterns
+    current_has_metrics = any('%' in line for line in current_lines)
+    next_has_metrics = any('%' in line for line in next_lines)
+    
+    if current_has_metrics and next_has_metrics:
+        return True
+    
+    return False
+
 def should_keep_together(current_chunk: str, next_paragraph: str) -> bool:
     """
     Determine if the next paragraph should be kept with the current chunk.
+    Enhanced version with table-aware chunking.
     """
     # If current chunk is empty, always add
     if not current_chunk.strip():
         return True
+    
+    # Check for table-like content first
+    current_has_table_content = has_table_content(current_chunk)
+    next_has_table_content = has_table_content(next_paragraph)
+    
+    # If current chunk has table content, check if it's complete
+    if current_has_table_content:
+        # Check if we're in the middle of a table
+        if is_incomplete_table(current_chunk):
+            return True  # Keep together to complete the table
+        
+        # Check if next paragraph continues the table
+        if next_has_table_content and is_table_continuation(current_chunk, next_paragraph):
+            return True
     
     # Check if next paragraph is a continuation of a list
     is_list_item, marker_type, level = is_ordered_list_item(next_paragraph)
@@ -348,8 +490,14 @@ def should_keep_together(current_chunk: str, next_paragraph: str) -> bool:
                         return False
     
     # Check total length - use smaller chunks for better RAG performance
+    # But allow larger chunks for table content
     combined_length = len(current_chunk) + len(next_paragraph)
-    return combined_length < 1000  # Reduced limit for better chunking
+    
+    # Allow larger chunks for table content
+    if current_has_table_content or next_has_table_content:
+        return combined_length < 2000  # Larger limit for table content
+    else:
+        return combined_length < 1000  # Normal limit for non-table content
 
 def is_part_of_hierarchical_section(chunk: str, item: str) -> bool:
     """

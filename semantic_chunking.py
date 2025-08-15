@@ -184,13 +184,73 @@ class SemanticChunker:
     
     def _chunk_section(self, section: Section) -> List[Chunk]:
         """
-        Chunk a section while preserving its structure
+        Chunk a section while preserving table content
         
         Args:
             section: Section to chunk
             
         Returns:
-            List of chunks for this section
+            List of chunks
+        """
+        # Check if section contains table content
+        if self._has_table_content(section.content):
+            # Keep entire section as one chunk if it contains tables
+            if len(section.content) <= self.max_chunk_size * 2:  # Allow larger chunks for tables
+                chunk = Chunk(
+                    content=section.content,
+                    chunk_id=f"section_{section.number}_with_table",
+                    section_number=section.number,
+                    section_title=section.title,
+                    chunk_type="complete_section_with_table",
+                    semantic_theme=self._extract_semantic_theme(section.content),
+                    list_items=self._extract_list_items(section.content),
+                    start_position=0,
+                    end_position=len(section.content)
+                )
+                return [chunk]
+        
+        # Apply normal chunking logic for non-table sections
+        return self._chunk_section_normal(section)
+    
+    def _has_table_content(self, content: str) -> bool:
+        """
+        Check if content contains table-like data
+        
+        Args:
+            content: Content to check
+            
+        Returns:
+            True if content contains table indicators
+        """
+        # Check for table indicators
+        table_indicators = [
+            'service level',  # Service level content
+            'kpi',  # Key performance indicators
+            'metric',  # Metrics
+            'requirement',  # Requirements
+            'bundle',  # Service bundle references
+            'availability',  # Availability metrics
+            'uptime',  # Uptime metrics
+            'performance',  # Performance metrics
+            'report',  # Reporting requirements
+            'frequency',  # Measurement frequency
+            'mechanism',  # Measurement mechanism
+            'ref.',  # Reference numbers
+            '%',  # Percentage metrics
+            'hours',  # Time-based metrics
+            'days'  # Time-based metrics
+        ]
+        return any(indicator in content.lower() for indicator in table_indicators)
+    
+    def _chunk_section_normal(self, section: Section) -> List[Chunk]:
+        """
+        Normal chunking logic for non-table sections
+        
+        Args:
+            section: Section to chunk
+            
+        Returns:
+            List of chunks
         """
         chunks = []
         

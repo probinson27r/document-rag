@@ -115,85 +115,9 @@ def fix_chromadb_metadata():
         print(f"❌ Error fixing metadata: {e}")
         return None
 
-def test_source_generation():
-    """Test the source generation after fixing metadata"""
-    
-    print(f"\n🧪 Testing Source Generation After Fix:")
-    print("-" * 50)
-    
-    try:
-        # Connect to ChromaDB
-        client = chromadb.PersistentClient(path='./chroma_db')
-        collection = client.get_collection('documents')
-        
-        # Get a few chunks to test
-        results = collection.get(limit=5)
-        
-        print(f"Testing source generation for {len(results['ids'])} chunks:")
-        print()
-        
-        for i, (chunk_id, content, metadata) in enumerate(zip(results['ids'], results['documents'], results['metadatas'])):
-            filename = metadata.get('filename', 'Unknown Document')
-            section_number = metadata.get('section_number', 'Unknown')
-            section_title = metadata.get('section_title', 'Unknown')
-            
-            section_info = f"{section_number} - {section_title}"
-            source_info = f"{filename}: {section_info}"
-            
-            print(f"Chunk {i+1}:")
-            print(f"  Content preview: {content[:100]}...")
-            print(f"  Section number: '{section_number}'")
-            print(f"  Section title: '{section_title}'")
-            print(f"  Generated source: '{source_info}'")
-            print()
-        
-        # Test with hybrid search
-        print(f"Testing with hybrid search:")
-        print("-" * 30)
-        
-        from hybrid_search import HybridSearch
-        
-        hybrid_search = HybridSearch()
-        test_query = "contract objectives"
-        search_results = hybrid_search.search_with_fallback(test_query, 3)
-        
-        print(f"Query: '{test_query}'")
-        print(f"Found {len(search_results)} results")
-        print()
-        
-        sources = []
-        for result in search_results:
-            try:
-                metadata_result = collection.get(
-                    ids=[result['id']],
-                    include=['metadatas']
-                )
-                if metadata_result['metadatas']:
-                    metadata = metadata_result['metadatas'][0]
-                    filename = metadata.get('filename', 'Unknown Document')
-                    section_info = f"{metadata.get('section_number', 'Unknown')} - {metadata.get('section_title', 'Unknown')}"
-                    source_info = f"{filename}: {section_info}"
-                    sources.append(source_info)
-                    print(f"  Generated source: '{source_info}'")
-                else:
-                    sources.append(f"Document chunk: {result['id']}")
-                    print(f"  No metadata found: Document chunk: {result['id']}")
-            except Exception as e:
-                sources.append(f"Document chunk: {result['id']}")
-                print(f"  Error getting metadata: {e}")
-        
-        return sources
-        
-    except Exception as e:
-        print(f"❌ Error testing source generation: {e}")
-        return None
-
 if __name__ == "__main__":
     # Fix the metadata
     fix_result = fix_chromadb_metadata()
-    
-    # Test source generation
-    sources = test_source_generation()
     
     print(f"\n🎯 Final Summary:")
     print("=" * 50)
@@ -202,16 +126,3 @@ if __name__ == "__main__":
         print(f"  - Updated {fix_result['updated_chunks']} chunks with section information")
         print(f"  - {fix_result['chunks_with_sections']} chunks already had section info")
         print(f"  - {fix_result['missing_sections']} chunks still missing section info")
-    
-    if sources:
-        print(f"✅ Source generation test completed:")
-        print(f"  Generated sources: {sources}")
-        
-        # Check if sources are now meaningful
-        meaningful_sources = [s for s in sources if 'Unknown' not in s or 'Document chunk:' not in s]
-        if meaningful_sources:
-            print(f"  ✅ Sources now contain meaningful section information!")
-        else:
-            print(f"  ❌ Sources still contain 'Unknown' values")
-    else:
-        print(f"❌ Source generation test failed")
