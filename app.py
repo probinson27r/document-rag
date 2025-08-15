@@ -2449,6 +2449,9 @@ def api_get_extraction_config():
                 'preserve_structure': True,
                 'prefer_private_gpt4': True,  # Prefer Private GPT-4 for chunking
                 'use_improved_chunking': True  # Use the improved chunking strategy by default
+            },
+            'ocr': {
+                'enabled': False  # OCR disabled by default for faster processing
             }
         }
         
@@ -2515,6 +2518,9 @@ def api_save_extraction_config():
                 'document_type': data.get('chunking', {}).get('document_type', 'auto'),
                 'preserve_structure': data.get('chunking', {}).get('preserve_structure', True),
                 'prefer_private_gpt4': data.get('chunking', {}).get('prefer_private_gpt4', True)
+            },
+            'ocr': {
+                'enabled': data.get('ocr', {}).get('enabled', False)
             }
         }
         
@@ -2576,6 +2582,9 @@ def api_extraction_status():
                 'method': 'auto',
                 'document_type': 'auto',
                 'preserve_structure': True
+            },
+            'ocr': {
+                'enabled': False
             }
         })
         
